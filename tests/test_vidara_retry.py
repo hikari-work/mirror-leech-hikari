@@ -59,8 +59,11 @@ class _Session:
         return False
 
 
-def _ok_body(master="https://cdn.test/master.m3u8"):
-    return {"success": True, "master_url": master, "title": "clip.mp4"}
+def _ok_body(master="https://cdn.test/master.m3u8", page_url=""):
+    body = {"success": True, "master_url": master, "title": "clip.mp4"}
+    if page_url:
+        body["page_url"] = page_url
+    return body
 
 
 def _hls_resp(url="https://cdn.test/master.m3u8"):
@@ -72,6 +75,22 @@ def _hls_resp(url="https://cdn.test/master.m3u8"):
         text="#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n",
         url=url,
     )
+
+class _MintSession(_Session):
+    """``_Session`` plus the stream-API POST the resolver mints a token with."""
+
+    def __init__(self, *responses, stream="", error=None):
+        super().__init__(*responses)
+        self.stream = stream
+        self.error = error
+        self.posted: list[tuple[str, str]] = []
+
+    def post(self, url, **kwargs):
+        body = kwargs.get("json") or {}
+        self.posted.append((url, body.get("filecode") or ""))
+        if self.error:
+            raise self.error
+        return _Resp(200, {"streaming_url": self.stream})
 
 
 # ── which answers are retryable ──────────────────────────────────────
@@ -227,3 +246,64 @@ def test_handler_does_not_retry_a_dead_link(vidara, monkeypatch):
         vidara.vidara("https://vidara.to/abc")
 
     assert session.calls == 1
+
+# ── the token, and which IP may use it ───────────────────────────────
+
+def test_resolve_mints_the_stream_here_not_at_the_gateway(vidara, monkeypatch):
+    """The CDN token is signed for the IP that minted it, and answers 404 from
+    any other. A URL the gateway minted is only good from the gateway, so the
+    bot used to hand yt-dlp a playlist that was already refused here."""
+    minted = "https://cdn.test/master.m3u8?token=here"
+    session = _MintSession(
+        _Resp(200, _ok_body(page_url="https://vidara.to/v/abc")),
+        stream=minted,
+    )
+    monkeypatch.setattr(vidara, "Session", lambda: session)
+
+    name, link, headers = vidara.vidara_resolve("https://vidara.to/abc")
+
+    assert name == "clip"
+    assert link == minted
+    assert headers["Referer"]
+    assert session.posted == [("https://vidara.to/api/stream", "abc")]
+
+def test_handler_probes_a_local_token_after_the_gateway_one_is_refused(
+    vidara, monkeypatch
+):
+    """A 404 on the gateway's URL is the IP, not a dead video: mint here, retry
+    the probe, and only report a rejection if that fails too."""
+    minted = "https://cdn.test/master.m3u8?token=here"
+    session = _MintSession(
+        _Resp(200, _ok_body(page_url="https://vidara.to/v/abc")),
+        _Resp(404, None),
+        _hls_resp(minted),
+        stream=minted,
+    )
+    monkeypatch.setattr(vidara, "Session", lambda: session)
+    monkeypatch.setattr(vidara, "sleep", lambda seconds: None)
+
+    resolved = vidara.vidara("https://vidara.to/v/abc")
+
+    assert resolved["link"] == minted
+    assert session.posted == [("https://vidara.to/api/stream", "abc")]
+
+def test_resolve_keeps_the_gateway_url_when_minting_here_fails(vidara, monkeypatch):
+    """A host that cannot reach Vidara directly is the case the gateway exists
+    for; a failed mint must not take the resolved link down with it."""
+    session = _MintSession(
+        _Resp(200, _ok_body(page_url="https://vidara.to/v/abc")),
+        error=OSError("no route to host"),
+    )
+    monkeypatch.setattr(vidara, "Session", lambda: session)
+
+    _, link, _ = vidara.vidara_resolve("https://vidara.to/abc")
+
+    assert link == "https://cdn.test/master.m3u8"
+
+def test_mint_refuses_a_host_this_module_does_not_serve(vidara):
+    """The page URL can come from a message, so the mint only posts to a host
+    this module already recognises."""
+    session = _MintSession(stream="https://evil.test/master.m3u8")
+
+    assert vidara.vidara_mint_stream(session, "https://evil.test/v/abc") == ""
+    assert session.posted == []
