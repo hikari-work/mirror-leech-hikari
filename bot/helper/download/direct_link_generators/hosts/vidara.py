@@ -439,6 +439,62 @@ def vidara_folder_list(url):
     }
 
 
+def vidara_page_target(url: str) -> tuple[str, str]:
+    """The host and file code of a ``/v/`` or ``/e/`` page, or ``("", "")``.
+
+    Only the hosts this module already recognises are returned: the mint below
+    posts to whatever host comes out of here, and the URL can be a user's.
+    """
+    if not isinstance(url, str):
+        return "", ""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    parts = [part for part in parsed.path.split("/") if part]
+    if host not in VIDARA_DOMAINS or len(parts) < 2 or parts[0].lower() not in (
+        "v",
+        "e",
+    ):
+        return "", ""
+    return host, parts[1]
+
+def vidara_mint_stream(session: Session, page_url: str, timeout: int = 30) -> str:
+    """Ask Vidara itself for the HLS URL, so the token is signed for this host.
+
+    The CDN token carries the IP that minted it and an expiry, and the CDN
+    answers a token from another IP with HTTP 404 -- not 403. A URL the gateway
+    minted is therefore only playable from the gateway, which is how a healthy
+    video came back as "HLS playlist rejected (HTTP 404)". Minting here makes
+    the playlist probe and the download come from the same IP.
+
+    Returns "" when the page is not a video, or the host cannot be reached
+    directly -- the caller then keeps the gateway's URL.
+    """
+    host, code = vidara_page_target(page_url)
+    if not host:
+        return ""
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": f"https://{host}",
+        "Referer": f"https://{host}/e/{code}",
+    }
+    try:
+        resp = session.post(
+            f"https://{host}/api/stream",
+            json={"device": "web", "filecode": code},
+            headers=headers,
+            timeout=timeout,
+        )
+        payload = resp.json()
+    except Exception as e:
+        LOGGER.info(f"Vidara: could not mint {code} here ({e.__class__.__name__})")
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("streaming_url") or "").strip()
+
 def vidara_resolve(url, name=""):
     """Resolve a Vidara page to its HLS master playlist for yt-dlp.
     Returns (name, link, headers) for HLS streaming."""
@@ -450,17 +506,25 @@ def vidara_resolve(url, name=""):
                 session, targets, nocache=nocache
             )
         )
+        master_url = response.get("master_url") or response.get(
+            "master_playlist_url"
+        )
+        # yt-dlp runs here, not on the gateway: a token the gateway minted is
+        # only good from the gateway's IP.
+        link = vidara_mint_stream(session, response.get("page_url") or url)
 
-    master_url = response.get("master_url") or response.get("master_playlist_url")
     return (
         name or vidara_stem(response),
-        master_url,
+        link or master_url,
         vidara_headers(response.get("download") or {}),
     )
 
 
 def _try_response(
-    response: dict, probe: Callable[[str, dict], tuple[str | None, str | None]]
+    response: dict,
+    probe: Callable[[str, dict], tuple[str | None, str | None]],
+    session: Session | None = None,
+    page_url: str = "",
 ) -> tuple[dict | None, str | None, bool]:
     """Turn a truthy scrape response into (result, reason, retryable).
 
@@ -473,6 +537,13 @@ def _try_response(
         return None, "no master URL in API response", False
     headers = vidara_headers(response.get("download") or {})
     hls_link, probe_reason = probe(master_url, headers)
+    if not hls_link and session is not None:
+        # The CDN token is signed for the IP that minted it and answers 404
+        # from any other. The gateway is another IP, so its URL fails here for
+        # a healthy video; mint one for this host and probe that.
+        minted = vidara_mint_stream(session, response.get("page_url") or page_url)
+        if minted and minted != master_url:
+            hls_link, probe_reason = probe(minted, headers)
     if hls_link:
         payload = {
             "ytdlp": True,
@@ -539,7 +610,9 @@ def _resolve_with_retries(
             )
 
             if response:
-                result, reason, retryable = _try_response(response, probe)
+                result, reason, retryable = _try_response(
+                    response, probe, session, url
+                )
                 if result:
                     return result
                 retry_after = None
