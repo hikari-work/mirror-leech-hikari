@@ -303,3 +303,35 @@ Working rules:
   ```bash
   git fetch upstream && git diff --stat upstream/master...origin/master   # must be empty
   ```
+
+### Two worktrees, one `.git`
+
+Both trees share a single object store, so nothing is cloned twice:
+
+| Directory | Branch | For |
+|---|---|---|
+| `~/mirror-leech-telegram-bot` | `master` → `personal/master` | personal work, the deployment (§8 above) |
+| `~/mirror-leech-contrib` | `contrib` → `upstream/master` | upstream contributions only |
+
+The directory names do **not** say which remote they belong to -- the personal
+tree is the one named `mirror-leech-telegram-bot`, while the fork it was named
+after is only a remote-tracking ref there. Check `git branch -vv`, not `pwd`.
+
+`contrib` is a long-lived branch parked on `upstream/master`, not a per-PR
+branch. Start a PR by branching off it inside the worktree:
+
+```bash
+cd ~/mirror-leech-contrib
+git fetch upstream && git merge --ff-only upstream/master   # on contrib
+git switch -c feat/some-fix                                 # now branch from here
+# ... commit ...
+git push origin feat/some-fix
+gh pr create --repo anasty17/mirror-leech-telegram-bot --head hikari-work:feat/some-fix
+git switch contrib && git branch -D feat/some-fix           # after the merge
+```
+
+The worktree has no `.venv`, `config.py` or `.env`: it is for commits, not for
+running the bot. Run the gates (§2) from the personal tree.
+
+`git worktree list` shows both; `git worktree remove ~/mirror-leech-contrib`
+drops the second one without touching the personal checkout.
