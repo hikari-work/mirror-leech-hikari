@@ -12,3 +12,6 @@ user_sessions.json
 __pycache__/
 /user_session_plan.md
 .idea/
+
+# local scratch: contains API gateway credentials
+shy.http
