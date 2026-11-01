@@ -5,4 +5,4 @@ httpx>=0.27
 
 # Type checking. Config lives in pyproject.toml, the debt ledger in
 # pyrefly-baseline.json.
-pyrefly>=1.2
+pyrefly>=1.4.0
