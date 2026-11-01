@@ -1,34 +1,41 @@
-# AGENTS.md — cara mengubah code di repo ini
+# AGENTS.md — how to change code in this repo
 
-Satu aturan mengikat sisanya: **tiap commit lulus tiga gerbang, membawa test
-yang sudah dibuktikan bisa gagal, dan code yang disentuhnya beranotasi tipe.**
-Sisa dokumen ini perinciannya.
+> This file is the English translation of the repo's process guide. The
+> original Indonesian text is kept verbatim in `AGENTS.id.md`. Keep
+> `AGENTS.md` in English: the AgentRouter gateway rejects non-English content
+> in the first user message (`400 content-blocked`), and this file is injected
+> into that message automatically by Claude Code/Codex.
 
-Angka yang dikutip di bawah adalah snapshot 2026-08-24 (`c4f47c5`). Ukur ulang,
-jangan percaya angkanya — yang mengikat adalah perintah dan targetnya.
+One rule binds the rest: **every commit passes three gates, carries a test
+that has been proven capable of failing, and the code it touches is
+type-annotated.** The rest of this document spells that out.
+
+The numbers quoted below are a snapshot from 2026-08-24 (`c4f47c5`). Measure
+them again; do not trust the numbers — what binds is the commands and their
+targets.
 
 ---
 
-## 1. Interpreter — salah pilih, code yang sehat terlihat rusak
+## 1. Interpreter — pick the wrong one and healthy code looks broken
 
-Tiga tool, tiga lokasi berbeda. Ini bukan detail kosmetik: `pytest` yang salah
-melaporkan **6 collection error** `ModuleNotFoundError: No module named
-'pyrogram'`, dan itu gampang dibaca sebagai "code-nya rusak" padahal cuma
-interpreternya keliru.
+Three tools, three different locations. This is not a cosmetic detail: the
+wrong `pytest` reports **6 collection errors** `ModuleNotFoundError: No module
+named 'pyrogram'`, and that is easy to read as "the code is broken" when only
+the interpreter is wrong.
 
-| Tool | Jalankan dengan | Kenapa |
+| Tool | Run with | Why |
 |---|---|---|
-| pytest | `.venv/bin/python -m pytest` | Dependensi ada di `.venv` (`kurigram` → modul `pyrogram`). `pytest` di PATH (`~/.local/bin`) memakai site-packages sistem yang tidak punya itu. |
-| ruff | `ruff check .` | Hanya ada di PATH (`~/.local/bin/ruff`), **tidak** di `.venv`. |
-| pyrefly | `.venv/bin/pyrefly check` | Hanya ada di `.venv`, **tidak** di PATH. |
+| pytest | `.venv/bin/python -m pytest` | Dependencies live in `.venv` (`kurigram` → `pyrogram` module). The `pytest` on PATH (`~/.local/bin`) uses system site-packages, which does not have it. |
+| ruff | `ruff check .` | Only on PATH (`~/.local/bin/ruff`), **not** in `.venv`. |
+| pyrefly | `.venv/bin/pyrefly check` | Only in `.venv`, **not** on PATH. |
 
-`.venv` dibuat tanpa system-site-packages, jadi `.venv/bin/python` adalah satu-satunya
-interpreter yang melihat requirements lengkap.
+`.venv` was created without system-site-packages, so `.venv/bin/python` is the
+only interpreter that sees the full requirements.
 
-**Kalau Anda agent yang jalan di bawah hook RTK:** hook itu memangkas output
-ruff (43 baris mentah → 28 baris, baris terakhir terpotong `b...`). Untuk
-angka dan daftar temuan yang utuh — yang jadi dasar diff di §2 — lewati
-filternya:
+**If you are an agent running under the RTK hook:** that hook trims ruff output
+(43 raw lines → 28 lines, the last line truncated to `b...`). For the complete
+numbers and findings list — which are the basis for the diff in §2 — bypass
+the filter:
 
 ```bash
 rtk proxy 'ruff check . --output-format concise'
@@ -36,212 +43,217 @@ rtk proxy 'ruff check . --output-format concise'
 
 ---
 
-## 2. Tiga gerbang
+## 2. Three gates
 
-Jalankan ketiganya sebelum commit. Bukan salah satu.
+Run all three before committing. Not just one.
 
 ```bash
-.venv/bin/python -m pytest -q                                # 1. test
+.venv/bin/python -m pytest -q                                # 1. tests
 ruff check .                                                 # 2. lint
-.venv/bin/pyrefly check --baseline pyrefly-baseline.json      # 3. tipe
+.venv/bin/pyrefly check --baseline pyrefly-baseline.json      # 3. types
 ```
 
-| Gerbang | Target | Snapshot 2026-08-24 |
+| Gate | Target | Snapshot 2026-08-24 |
 |---|---|---|
 | pytest | 0 failed | 872 passed, 0 failed (~24 s) |
-| ruff | 0 temuan | **41 temuan** — lihat §5 |
+| ruff | 0 findings | **41 findings** — see §5 |
 | pyrefly | 0 errors | 0 errors (36 suppressed) |
 
-**Soal 41 temuan ruff itu.** Semuanya utang yang masuk *setelah* refactor
-Fase 10 selesai, dan tidak satu pun tercatat di ledger `per-file-ignores`
-(§5) — jadi bukan utang yang disahkan, tapi regresi yang lolos. Sebarannya:
-`bot/core/handlers.py` (18× E501), `hosts/vidara.py` (5), `pornhub_scraper.py`
-(6), plus I001 tersebar dan 3 di `tests/`.
+**About those 41 ruff findings.** All of them are debt that came in *after*
+Phase 10 of the refactor finished, and none are recorded in the
+`per-file-ignores` ledger (§5) — so they are not sanctioned debt, but
+regressions that slipped through. Distribution: `bot/core/handlers.py`
+(18× E501), `hosts/vidara.py` (5), `pornhub_scraper.py` (6), plus scattered
+I001 and 3 in `tests/`.
 
-Konsekuensinya untuk pekerjaan Anda: **jangan pakai angka 41 sebagai izin.**
-Bandingkan sebelum dan sesudah supaya temuan Anda tidak menyamar sebagai
-temuan yang sudah ada:
+The consequence for your work: **do not use the number 41 as permission.**
+Compare before and after so your findings do not masquerade as pre-existing
+ones:
 
 ```bash
-ruff check . --output-format concise | sort > /tmp/before.txt   # sebelum menyentuh apa pun
-# ... kerjakan perubahannya ...
+ruff check . --output-format concise | sort > /tmp/before.txt   # before touching anything
+# ... make your changes ...
 ruff check . --output-format concise | sort > /tmp/after.txt
-diff /tmp/before.txt /tmp/after.txt                            # harus kosong, atau hanya berisi baris yang hilang
+diff /tmp/before.txt /tmp/after.txt                            # must be empty, or contain only removed lines
 ```
 
-File yang Anda sentuh idealnya keluar dari daftar itu sekalian. Kalau tidak,
-minimal jangan menambah barisnya.
+Files you touch should ideally leave that list as well. If not, at least do
+not add lines to it.
 
 ---
 
 ## 3. Type hints
 
-`pyrefly` adalah pemeriksa tipenya; konfigurasi di `[tool.pyrefly]`
-(`pyproject.toml`), cakupan `bot` + `web`.
+`pyrefly` is the type checker; configuration lives in `[tool.pyrefly]`
+(`pyproject.toml`), covering `bot` + `web`.
 
-**Aturannya:** tiap fungsi/method yang Anda tambah — atau yang signature-nya
-Anda ubah — dapat anotasi parameter dan anotasi return.
+**The rule:** every function/method you add — or whose signature you change —
+gets parameter and return annotations.
 
-Yang perlu diketahui: **ruff tidak akan menangkap hint yang hilang.** Aturan
-`ANN` (flake8-annotations) sengaja tidak diaktifkan, karena code lama punya
-2255 temuan ANN dan menyalakannya akan menenggelamkan yang baru. Artinya
-kelengkapan anotasi ditegakkan oleh review, bukan oleh linter. Periksa diff
-Anda sendiri — dan hanya baris yang Anda sentuh:
+What you need to know: **ruff will not catch missing hints.** The `ANN` rules
+(flake8-annotations) are deliberately disabled because the old code has 2255
+ANN findings and enabling them would drown the new ones. That means annotation
+completeness is enforced by review, not by the linter. Check your own diff —
+and only the lines you touch:
 
 ```bash
-ruff check <file-yang-diubah> --select ANN
+ruff check <changed-file> --select ANN
 ```
 
-Gaya rumah, sesuai code yang sudah ada:
+House style, matching the existing code:
 
-- PEP 604 untuk union: `FloodWait | FloodPremiumWait`, `str | None`. Bukan `Optional[...]`.
-- `collections.abc` untuk `Callable`/`Iterable`, bukan `typing`.
-- `from __future__ import annotations` ditambahkan **kalau butuh** forward
-  reference atau ingin menjaga anotasi tetap murah — 23 dari 145 file di
-  `bot`/`web` memakainya, jadi bukan kewajiban.
-- Kalau banyak call site membaca atribut `self` yang di-set di file lain,
-  tuliskan kontraknya sekali di satu class annotation-only yang inert.
-  Presedennya `bot/helper/task/_host.py` (41 atribut, tanpa `__init__`,
-  tanpa nilai — komposisinya tidak mengubah apa pun saat runtime).
-- Sebab yang menyuapi banyak temuan sekaligus di-root-cause, bukan dianotasi
-  satu-satu di tiap call site. Presedennya `flood_seconds()` di
-  `bot/helper/telegram/flood.py`: satu fungsi menggantikan lima
-  `sleep(f.value * slack)` yang berhitung di atas tipe yang mungkin `str`.
+- PEP 604 for unions: `FloodWait | FloodPremiumWait`, `str | None`. Not `Optional[...]`.
+- Use `collections.abc` for `Callable`/`Iterable`, not `typing`.
+- Add `from __future__ import annotations` **only when needed** for forward
+  references or to keep annotations cheap — 23 of 145 files in `bot`/`web` use
+  it, so it is not mandatory.
+- If many call sites read `self` attributes set in another file, write the
+  contract once in an inert annotation-only class. Precedent:
+  `bot/helper/task/_host.py` (41 attributes, no `__init__`, no values — the
+  composition changes nothing at runtime).
+- Root-cause a cause that feeds many findings at once, rather than annotating
+  each call site. Precedent: `flood_seconds()` in
+  `bot/helper/telegram/flood.py`: one function replaced five
+  `sleep(f.value * slack)` calls computing on a possibly-`str` type.
 
-**Yang tidak boleh:**
+**What is not allowed:**
 
-- `# type: ignore` untuk melewati gerbang. Cari akarnya. Kalau temuannya
-  memang bug pihak ketiga, baru baseline-kan, dengan komentar yang menjelaskan
-  kenapa — 5 entri yang ada semuanya satu bug pyrogram (`thumb: Union[str,
-  BinaryIO] = None` di signature-nya sendiri).
-- `pyrefly check --update-baseline` untuk membungkam temuan baru. Perintah itu
-  hanya untuk saat utang benar-benar dibereskan (entri hilang) atau sengaja
-  diterima setelah dipikirkan.
+- `# type: ignore` to bypass a gate. Find the root cause. If the finding really
+  is a third-party bug, then baseline it, with a comment explaining why — the
+  5 existing entries are all one pyrogram bug (`thumb: Union[str,
+  BinaryIO] = None` in its own signature).
+- `pyrefly check --update-baseline` to silence new findings. That command is
+  only for when debt is actually paid off (entries disappear) or deliberately
+  accepted after thought.
 
-Baseline dipilih alih-alih mematikan kode-error per file justru karena bedanya:
-mematikan `bad-assignment` untuk satu modul juga menelan `bad-assignment`
-*berikutnya* di modul itu; baseline mencatat temuan satu per satu, jadi yang
-baru tetap dilaporkan meski jenis dan file-nya sudah pernah muncul.
-
----
-
-## 4. Test
-
-**Tiap perubahan perilaku membawa test, dan test itu sudah dibuktikan gagal
-tanpa perubahannya.** Pembuktian itu ditulis di body commit — bukan diklaim,
-tapi dilaporkan. Test yang tidak pernah dilihat gagal tidak menjamin apa pun.
-
-Letak dan bentuk:
-
-- `tests/test_<subjek>.py`. `asyncio_mode = auto`, jadi `async def test_...`
-  tidak perlu marker. Marker yang dikenal cuma `slow`, dan `--strict-markers`
-  aktif — marker yang salah tulis akan error, bukan diam.
-- Mengimpor modul `bot` menarik seluruh rantainya (lxml, cloudscraper,
-  pyrogram), dan `bot/__init__.py` punya efek samping saat import
-  (`uvloop.install()`, bikin event loop, buka `log.txt`). Untuk menguji satu
-  modul daun, **stub package-nya** alih-alih mengimpor rantai itu — preseden:
-  fixture `bunkr` dan `vidara` di `tests/conftest.py` memuat satu file host
-  lewat `spec_from_file_location` dengan `_common`/`registry` yang dipalsukan.
-- `DOWNLOAD_DIR = "/app/downloads/"` hardcoded; test yang menyentuh path perlu
-  monkeypatch.
-
-**Untuk refactor yang menjanjikan perilaku tidak berubah**, dua test saja tidak
-cukup — pola yang dipakai repo ini ada dua lapis:
-
-1. **Differential harness** di `tools/archive/` — memuat modul versi pra-refactor
-   langsung dari git di samping versi working tree, menjalankan keduanya lewat
-   skenario yang sama, lalu membandingkan **panggilan** (method mana, argumen
-   apa, urutan apa), **log**, **state**, dan **hasil** (nilai kembali atau
-   exception). Preseden: `tools/archive/_phase11b_diff.py`, 103 skenario.
-2. **Mutation check** — harness yang melaporkan "identical" belum berarti apa
-   pun sampai terbukti bisa membedakan. Script mutasi merusak code baru satu
-   perubahan kecil sekaligus dan menuntut harness-nya gagal di setiap mutasi.
-   Preseden: `tools/archive/_phase11b_mutants.py`, 62 mutasi, 62 tertangkap.
-   **Mutan yang lolos bukan lulus** — itu entah lubang di harness, entah baris
-   yang tidak berpengaruh, dan mana dari keduanya harus dipastikan, bukan
-   diasumsikan.
-
-`tests/` dan `tools/` di luar cakupan pyrefly (164 temuan, akan menenggelamkan
-temuan dari code yang ship), tapi **tetap** di dalam cakupan ruff.
+Baseline was chosen over disabling code errors per file precisely because of
+the difference: disabling `bad-assignment` for one module also swallows the
+*next* `bad-assignment` in that module; a baseline records findings one by
+one, so new ones are still reported even if their type and file have appeared
+before.
 
 ---
 
-## 5. Ledger lint — menyusut, tidak pernah bertambah
+## 4. Tests
 
-`[tool.ruff.lint.per-file-ignores]` di `pyproject.toml` adalah daftar utang
-yang sudah ada sebelum refactor, dicabut per fase. Aturannya satu arah: **baris
-dihapus saat file dibereskan; menambah baris baru adalah regresi.** Kalau Anda
-menyentuh file yang punya entri, bereskan temuan yang tersisa dan hapus
-barisnya.
+**Every behavior change brings a test, and that test has been proven to fail
+without the change.** The proof is written in the commit body — not claimed,
+but reported. A test that has never been seen to fail guarantees nothing.
 
-Memastikan satu direktori benar-benar tidak punya utang — bukan sekadar
-utangnya sedang disembunyikan:
+Location and shape:
+
+- `tests/test_<subject>.py`. `asyncio_mode = auto`, so `async def test_...`
+  needs no marker. The only recognized marker is `slow`, and
+  `--strict-markers` is on — a misspelled marker errors rather than being
+  silently ignored.
+- Importing the `bot` module pulls in the whole chain (lxml, cloudscraper,
+  pyrogram), and `bot/__init__.py` has import side effects
+  (`uvloop.install()`, creates an event loop, opens `log.txt`). To test a leaf
+  module, **stub the package** instead of importing the chain — precedent: the
+  `bunkr` and `vidara` fixtures in `tests/conftest.py` load one host file via
+  `spec_from_file_location` with `_common`/`registry` faked.
+- `DOWNLOAD_DIR = "/app/downloads/"` is hardcoded; tests that touch paths need
+  monkeypatching.
+
+**For a refactor that promises unchanged behavior**, two tests are not
+enough — this repo uses two layers:
+
+1. **Differential harness** in `tools/archive/` — loads the pre-refactor
+   module version directly from git alongside the working-tree version, runs
+   both through the same scenarios, then compares **calls** (which method,
+   what arguments, what order), **logs**, **state**, and **results** (return
+   value or exception). Precedent: `tools/archive/_phase11b_diff.py`, 103
+   scenarios.
+2. **Mutation check** — a harness reporting "identical" means nothing until it
+   is proven able to tell a difference. The mutation script breaks the new
+   code one small change at a time and requires the harness to fail on every
+   mutation. Precedent: `tools/archive/_phase11b_mutants.py`, 62 mutations,
+   62 caught. **A mutant that survives is not a pass** — it is either a hole
+   in the harness or a line with no effect, and which one must be determined,
+   not assumed.
+
+`tests/` and `tools/` are outside pyrefly's scope (164 findings, they would
+drown findings from code that ships), but **still** inside ruff's scope.
+
+---
+
+## 5. Lint ledger — shrinks, never grows
+
+`[tool.ruff.lint.per-file-ignores]` in `pyproject.toml` is the list of debt
+that existed before the refactor, withdrawn phase by phase. The rule is
+one-way: **delete a line when the file is cleaned up; adding a new line is a
+regression.** If you touch a file that has an entry, clear the remaining
+findings and remove its line.
+
+To make sure a directory really has no debt — not merely that its debt is
+hidden:
 
 ```bash
 ruff check bot/helper/upload/ --config 'lint.per-file-ignores = {}'
 ```
 
-`upload/` sekarang bersih dengan perintah itu. Kalau nanti ada yang
-menambahkan barisnya kembali, itu regresi, bukan penyesuaian.
+`upload/` is now clean with that command. If someone later adds its line back,
+that is a regression, not an adjustment.
 
-Ambang yang berlaku: `line-length = 88`, `target-version = "py314"`,
-`max-complexity = 10`. `.venv` dan `qBittorrent` dikecualikan.
+Effective thresholds: `line-length = 88`, `target-version = "py314"`,
+`max-complexity = 10`. `.venv` and `qBittorrent` are excluded.
 
-Untuk menilai kapan sebuah baris ledger sudah boleh dicabut (dan untuk melihat
-apakah perubahan Anda menambah kompleksitas):
+To judge when a ledger line may be removed (and to see whether your change
+adds complexity):
 
 ```bash
 .venv/bin/python tools/complexity_report.py --summary
 .venv/bin/python tools/complexity_report.py --diff tools/baseline.txt
 ```
 
-CX-nya dihitung dengan pendekatan yang sama dengan C901 ruff, jadi angkanya
-sebanding. Catat bahwa target §5 `REFACTOR_PLAN.md` belum semuanya tercapai
-(`cx_max` masih 69, target ≤ 15) — jangan tambah, dan kurangi kalau lewat.
+CX is computed with the same approach as ruff's C901, so the numbers are
+comparable. Note that the §5 targets in `REFACTOR_PLAN.md` are not all met
+(`cx_max` is still 69, target ≤ 15) — do not add, and reduce if over.
 
 ---
 
-## 6. Alur satu perubahan
+## 6. One change, end to end
 
-1. **Baca dulu.** `REFACTOR_PLAN.md` mencatat kenapa banyak hal berbentuk
-   seperti sekarang, termasuk asimetri yang disengaja. Melawan salah satunya
-   tanpa tahu itu disengaja biasanya jadi bug.
-2. **Rekam baseline ruff** (§2) sebelum menyentuh apa pun.
-3. **Satu perubahan logis per commit.** Ekstraksi dan perbaikan perilaku tidak
-   digabung — kalau refactor mengubah perilaku, perubahan perilakunya jadi
-   commit `fix:`/`feat:` tersendiri (preseden: empat `eval()` di Fase 7).
-4. **Tulis testnya, lihat gagal, baru perbaiki.**
-5. **Anotasi apa pun yang Anda tulis** (§3).
-6. **Jalankan tiga gerbang** (§2). Tidak ada yang di-skip karena "cuma ubah
-   satu baris".
-7. **Cabut baris ledger** kalau file yang disentuh sudah bersih (§5).
+1. **Read first.** `REFACTOR_PLAN.md` records why many things are shaped the
+   way they are, including deliberate asymmetries. Fighting one of those
+   without knowing it is deliberate usually becomes a bug.
+2. **Record the ruff baseline** (§2) before touching anything.
+3. **One logical change per commit.** Extraction and behavior fixes are not
+   combined — if a refactor changes behavior, the behavior change becomes its
+   own `fix:`/`feat:` commit (precedent: four `eval()` calls in Phase 7).
+4. **Write the test, watch it fail, then fix.**
+5. **Annotate anything you write** (§3).
+6. **Run the three gates** (§2). Nothing is skipped because it is "only one
+   line".
+7. **Remove the ledger line** if the file you touched is now clean (§5).
 8. **Commit** (§7).
 
-Selesai berarti: 0 test gagal, tidak ada temuan ruff baru, pyrefly 0 errors,
-code baru beranotasi, dan test barunya sudah terbukti bisa gagal. Kalau ada
-bagian yang tidak bisa dituntaskan, katakan bagian mana dan kenapa — jangan
-diamkan.
+Done means: 0 failing tests, no new ruff findings, pyrefly 0 errors, new code
+annotated, and the new test proven able to fail. If part of it cannot be
+finished, say which part and why — do not stay silent.
 
 ---
 
 ## 7. Commit
 
-Ringkasan: `<type>: <imperatif huruf kecil>` — `feat`, `fix`, `refactor`,
-`perf`, `docs`. Body menjelaskan **kenapa**, bukan mengulang diff: masalah apa
-yang ada sebelumnya, apa yang berubah secara perilaku, dan hasil verifikasinya
-(jumlah test, skenario harness, mutasi tertangkap, hasil di lingkungan nyata
-kalau ada). Akhiri dengan:
+Summary: `<type>: <lowercase imperative>` — `feat`, `fix`, `refactor`,
+`perf`, `docs`. The body explains **why**, not a repeat of the diff: what
+problem existed before, what changed behaviorally, and the verification
+results (test count, harness scenarios, mutations caught, results in a real
+environment if any). End with:
 
 ```
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
-**Bahasa.** Ini bukan preferensi, ini pola yang sudah konsisten di repo:
+**Language.** This is not a preference, it is a pattern already consistent in
+the repo:
 
-| Di mana | Bahasa |
+| Where | Language |
 |---|---|
-| Commit message | Inggris |
-| Docstring & komentar di `bot/`, `web/`, `tests/` | Inggris |
-| Dokumen proses (`AGENTS.md`, `REFACTOR_PLAN.md`), komentar `pyproject.toml`, docstring `tools/` | Indonesia |
+| Commit messages | English |
+| Docstrings & comments in `bot/`, `web/`, `tests/` | English |
+| `AGENTS.md` (this file, auto-loaded at session start) | English |
+| Process docs (`AGENTS.id.md`, `REFACTOR_PLAN.md`), `pyproject.toml` comments, `tools/` docstrings | Indonesian |
 
-Commit dan push hanya kalau diminta.
+Commit and push only when asked.
