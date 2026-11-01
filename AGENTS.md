@@ -257,3 +257,49 @@ the repo:
 | Process docs (`AGENTS.id.md`, `REFACTOR_PLAN.md`), `pyproject.toml` comments, `tools/` docstrings | Indonesian |
 
 Commit and push only when asked.
+
+---
+
+## 8. Two remotes — one fork, one personal repo
+
+This checkout is wired to three remotes. They are not interchangeable:
+
+| Remote | Repository | Role |
+|---|---|---|
+| `upstream` | `anasty17/mirror-leech-telegram-bot` | Read-only source of truth. Never push here. |
+| `origin` | `hikari-work/mirror-leech-telegram-bot` | GitHub fork. `master` is kept **byte-identical** to `upstream/master` so a PR branch cut from it contains only that PR's commits. |
+| `personal` | `hikari-work/mirror-leech-hikari` | The diverged tree — every local feature commit lives here. `master` tracks this remote. |
+
+Why the split: `master` on the fork once carried 161 feature commits on top
+of upstream. A PR opened from such a branch shows all 161, not the one change
+you meant to send. The fork's `master` was force-pushed back to
+`upstream/master`; the 162-commit tree is preserved on `personal/master`.
+
+Working rules:
+
+- **Local `master` tracks `personal/master`.** Run the gates (§2) here and
+  push feature work with `git push personal master`.
+- **Contributing upstream:** cut the branch from `upstream/master`, never from
+  local `master`, then push the branch to the fork.
+
+  ```bash
+  git fetch upstream
+  git checkout -b fix-a-upstream-bug upstream/master
+  # ... commit ...
+  git push origin fix-a-upstream-bug
+  gh pr create --repo anasty17/mirror-leech-telegram-bot --head hikari-work:fix-a-upstream-bug
+  ```
+
+- **Pulling upstream fixes** into the personal tree:
+
+  ```bash
+  git fetch upstream
+  git merge upstream/master        # on local master, then push personal
+  ```
+
+- **Never** push local feature commits to `origin/master`. The fork's `master`
+  must equal `upstream/master`; verify with:
+
+  ```bash
+  git fetch upstream && git diff --stat upstream/master...origin/master   # must be empty
+  ```
