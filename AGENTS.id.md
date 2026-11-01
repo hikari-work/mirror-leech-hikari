@@ -242,6 +242,156 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 |---|---|
 | Commit message | Inggris |
 | Docstring & komentar di `bot/`, `web/`, `tests/` | Inggris |
-| Dokumen proses (`AGENTS.md`, `REFACTOR_PLAN.md`), komentar `pyproject.toml`, docstring `tools/` | Indonesia |
+| `AGENTS.md` (terjemahan Inggris, dimuat otomatis saat sesi mulai) | Inggris |
+| Dokumen proses (`AGENTS.id.md`, `REFACTOR_PLAN.md`), komentar `pyproject.toml`, docstring `tools/` | Indonesia |
 
 Commit dan push hanya kalau diminta.
+
+---
+
+## 8. Dua remote — satu fork, satu repo personal
+
+Checkout ini terpasang ke tiga remote. Ketiganya tidak bisa saling menggantikan:
+
+| Remote | Repository | Peran |
+|---|---|---|
+| `upstream` | `anasty17/mirror-leech-telegram-bot` | Sumber kebenaran, read-only. Jangan pernah push ke sini. |
+| `origin` | `hikari-work/mirror-leech-telegram-bot` | Fork GitHub. `master`-nya dijaga **identik byte-per-byte** dengan `upstream/master` supaya branch PR yang dipotong darinya hanya memuat commit PR itu. |
+| `personal` | `hikari-work/mirror-leech-hikari` | Pohon yang divergen — semua commit fitur lokal ada di sini. `master` melacak remote ini. |
+
+Kenapa dipisah: `master` di fork pernah membawa 161 commit fitur di atas
+upstream. PR yang dibuka dari branch semacam itu menampilkan semua 161 commit,
+bukan satu perubahan yang dimaksud. `master` fork sudah di-force-push kembali
+ke `upstream/master`; pohon 162 commit-nya diawetkan di `personal/master`.
+
+Aturan kerja:
+
+- **`master` lokal melacak `personal/master`.** Jalankan gerbang (§2) di sini
+  dan push pekerjaan fitur dengan `git push personal master`.
+- **Berkontribusi ke upstream:** potong branch dari `upstream/master`, jangan
+  pernah dari `master` lokal, lalu push branch itu ke fork.
+
+  ```bash
+  git fetch upstream
+  git checkout -b fix-upstream-bug upstream/master
+  # ... commit ...
+  git push origin fix-upstream-bug
+  gh pr create --repo anasty17/mirror-leech-telegram-bot --head hikari-work:fix-upstream-bug
+  ```
+
+- **Menarik perbaikan upstream** ke pohon personal:
+
+  ```bash
+  git fetch upstream
+  git merge upstream/master        # di master lokal, lalu push personal
+  ```
+
+- **Jangan pernah** push commit fitur lokal ke `origin/master`. `master` fork
+  harus sama dengan `upstream/master`; verifikasi dengan:
+
+  ```bash
+  git fetch upstream && git diff --stat upstream/master...origin/master   # harus kosong
+  ```
+
+### Dua worktree, satu `.git`
+
+Kedua pohon berbagi satu object store, jadi tidak ada yang diklon dua kali:
+
+| Direktori | Branch | Untuk |
+|---|---|---|
+| `~/mirror-leech-telegram-bot` | `master` → `personal/master` | kerja personal, dan deployment |
+| `~/mirror-leech-contrib` | `contrib` → `upstream/master` | khusus kontribusi upstream |
+
+Nama direktori **tidak** menunjukkan remote-nya -- pohon personal justru yang
+bernama `mirror-leech-telegram-bot`, sementara fork dengan nama itu hanya ref
+remote-tracking di dalamnya. Periksa `git branch -vv`, bukan `pwd`.
+
+`contrib` adalah branch berumur panjang yang diparkir di `upstream/master`,
+bukan branch per-PR. Mulai PR dengan bercabang darinya di dalam worktree:
+
+```bash
+cd ~/mirror-leech-contrib
+git fetch upstream && git merge --ff-only upstream/master   # di contrib
+git switch -c feat/some-fix                                 # baru bercabang dari sini
+# ... commit ...
+git push origin feat/some-fix
+gh pr create --repo anasty17/mirror-leech-telegram-bot --head hikari-work:feat/some-fix
+git switch contrib && git branch -D feat/some-fix           # setelah di-merge
+```
+
+Worktree itu tidak punya `.venv`, `config.py`, atau `.env`: tempatnya untuk
+commit, bukan menjalankan bot. Jalankan gerbang (§2) dari pohon personal.
+
+`git worktree list` menampilkan keduanya; `git worktree remove
+~/mirror-leech-contrib` melepas yang kedua tanpa menyentuh checkout personal.
+
+### Deployment harus menunjuk `personal`, jangan pernah ke fork
+
+`update.py` menulis ulang checkout yang berjalan pada setiap boot: ia menghapus
+`.git`, `git add .` seluruh pohon jadi satu commit sekali pakai, lalu
+`git reset --hard origin/{UPSTREAM_BRANCH}`. Dua konsekuensinya, dan keduanya
+sudah pernah memakan korban.
+
+**1. `UPSTREAM_REPO` menentukan code mana yang dipasang restart berikutnya.**
+Arahkan ke fork dan restart akan memasang upstream polos -- 162 commit fitur
+hilang dari checkout, sementara `config.py`, session, dan download selamat,
+jadi kerusakannya senyap sampai ada perintah yang sudah tidak ada dipanggil.
+`UPSTREAM_REPO` sebuah deployment harus remote personal:
+
+```
+UPSTREAM_REPO   = 'https://github.com/hikari-work/mirror-leech-hikari.git'
+UPSTREAM_BRANCH = 'master'
+```
+
+Nilainya tidak hanya dibaca dari `config.py`. `update.py` juga membaca
+`settings_config.data` dari PostgreSQL untuk `bot_id` yang berjalan dan
+membiarkannya menimpa file, dan bot sendiri membaca ulang `UPSTREAM_REPO` dari
+baris yang sama saat runtime. **Setiap `bot_id` di tabel itu adalah senjata
+terkokang**: menjalankan salah satunya menjalankan ulang `update.py` terhadap
+repo tersimpannya, ke dalam `/app` yang **dipakai bersama**. Ubah satu baris
+dan bot yang sedang jalan tetap memakai code-nya; lewatkan satu baris dan bot
+berikutnya yang boot akan mengganti code di bawah semuanya. Audit seluruh
+tabel, bukan hanya baris bot yang kebetulan sedang dilihat.
+
+**2. `git add .` meng-commit file untracked, dan `reset --hard`
+menghapusnya.** Apa pun yang tidak ditutup file ignore ikut ter-commit ke
+commit sekali pakai itu lalu terhapus. Praktiknya itu adalah state
+qBittorrent: `qBittorrent/data/nova3/**` (plugin pencarian),
+`qBittorrent/data/GeoDB/*.mmdb`,
+`qBittorrent/config/{categories,watched_folders}.json`, `rss/`, dan
+`qBittorrent/config/qBittorrent.conf` yang sudah diedit -- yang membawa
+`WebUI\Password_PBKDF2` dan pilihan port listen.
+
+Sebagian beregenerasi sendiri (plugin dipasang ulang dari
+`Config.SEARCH_PLUGINS`, GeoDB diunduh ulang), tapi password WebUI dan pilihan
+port hanya hidup di file itu. Backup sebelum update apa pun yang menyentuh
+checkout:
+
+```bash
+docker cp <container>:/app/qBittorrent/config/qBittorrent.conf ./qbit-backup.conf
+```
+
+**Update deployment dengan aman.** Restart hanya gratis kalau tidak ada yang
+berjalan: `aria2.tellActive` kosong, `curl /api/v2/torrents/info` di WebUI
+qBittorrent kosong, dan tidak ada anak `ffmpeg`/`7z`/`split`. Lalu pilih: biarkan
+`/restart` menjalankan `update.py` setelah file di atas dibackup, atau lakukan
+reset manual dan pertahankan edit lokal:
+
+```bash
+# di dalam container, sebelum reset
+tar czf /tmp/qb.tgz \
+  qBittorrent/config/qBittorrent.conf qBittorrent/config/qBittorrent-data.conf \
+  qBittorrent/config/categories.json qBittorrent/config/watched_folders.json \
+  qBittorrent/config/rss qBittorrent/data/GeoDB qBittorrent/data/nova3
+git stash push -u -- qBittorrent/config/qBittorrent.conf aria-nox.sh
+
+git merge --ff-only origin/master   # atau biarkan update.py saat boot berikutnya
+tar xzf /tmp/qb.tgz                 # pulihkan yang terhapus oleh merge
+```
+
+Perhatikan bahwa `update.py` bukan opsional untuk sebuah *boot* -- `start.sh`
+selalu menjalankannya -- jadi jalur amannya adalah membenarkan inputnya, bukan
+menghindarinya.
+
+Jangan menaruh hostname, path, atau kredensial deployment yang hidup di file
+ini: repository-nya publik. Yang transferabel adalah invarian di atas.

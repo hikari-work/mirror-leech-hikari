@@ -310,7 +310,7 @@ Both trees share a single object store, so nothing is cloned twice:
 
 | Directory | Branch | For |
 |---|---|---|
-| `~/mirror-leech-telegram-bot` | `master` → `personal/master` | personal work, the deployment (§8 above) |
+| `~/mirror-leech-telegram-bot` | `master` → `personal/master` | personal work, and the deployment |
 | `~/mirror-leech-contrib` | `contrib` → `upstream/master` | upstream contributions only |
 
 The directory names do **not** say which remote they belong to -- the personal
@@ -335,3 +335,71 @@ running the bot. Run the gates (§2) from the personal tree.
 
 `git worktree list` shows both; `git worktree remove ~/mirror-leech-contrib`
 drops the second one without touching the personal checkout.
+
+### A deployment must point at `personal`, never at the fork
+
+`update.py` rewrites the running checkout on every boot: it deletes `.git`,
+`git add .`s the whole tree into one throwaway commit, then
+`git reset --hard origin/{UPSTREAM_BRANCH}`. Two things follow, and both have
+already cost a deployment.
+
+**1. `UPSTREAM_REPO` decides which code the next restart installs.** Point it
+at the fork and a restart installs plain upstream -- the 162 feature commits
+are gone from the checkout, while `config.py`, the sessions and the downloads
+survive, so the damage is silent until a command that no longer exists is
+typed. A deployment's `UPSTREAM_REPO` must be the personal remote:
+
+```
+UPSTREAM_REPO   = 'https://github.com/hikari-work/mirror-leech-hikari.git'
+UPSTREAM_BRANCH = 'master'
+```
+
+It is not only read from `config.py`. `update.py` also reads
+`settings_config.data` from PostgreSQL for the running `bot_id` and lets that
+override the file, and the bot itself re-reads `UPSTREAM_REPO` from the same
+row at runtime. **Every `bot_id` in that table is a loaded gun**: starting any
+of them re-runs `update.py` against *its* stored repo, into the *shared*
+`/app`. Change one row and the running bot keeps its code; miss one and the
+next bot to boot replaces the code under all of them. Audit the whole table,
+not the row of the bot you happen to be looking at.
+
+**2. `git add .` commits untracked files, and `reset --hard` deletes them.**
+Anything the ignore file does not cover is committed into the throwaway commit
+and then wiped. In practice that is the qBittorrent state:
+`qBittorrent/data/nova3/**` (search plugins), `qBittorrent/data/GeoDB/*.mmdb`,
+`qBittorrent/config/{categories,watched_folders}.json`, `rss/`, and the
+edited `qBittorrent/config/qBittorrent.conf` -- which carries
+`WebUI\Password_PBKDF2` and the chosen listen ports.
+
+Some of that regenerates (the plugins are reinstalled from
+`Config.SEARCH_PLUGINS`, GeoDB is re-downloaded), but the WebUI password and
+the port choices only live in that file. Back it up before any update that
+touches the checkout:
+
+```bash
+docker cp <container>:/app/qBittorrent/config/qBittorrent.conf ./qbit-backup.conf
+```
+
+**Updating a deployment safely.** A restart is only free when nothing is
+running: `aria2.tellActive` empty, `curl /api/v2/torrents/info` on the
+qBittorrent WebUI empty, and no `ffmpeg`/`7z`/`split` child. Then either let
+`/restart` run `update.py` after backing the files above up, or do the reset by
+hand and keep the local edits:
+
+```bash
+# inside the container, before the reset
+tar czf /tmp/qb.tgz \
+  qBittorrent/config/qBittorrent.conf qBittorrent/config/qBittorrent-data.conf \
+  qBittorrent/config/categories.json qBittorrent/config/watched_folders.json \
+  qBittorrent/config/rss qBittorrent/data/GeoDB qBittorrent/data/nova3
+git stash push -u -- qBittorrent/config/qBittorrent.conf aria-nox.sh
+
+git merge --ff-only origin/master   # or let update.py do this on next boot
+tar xzf /tmp/qb.tgz                 # restore what the merge removed
+```
+
+Note that `update.py` is not optional for a *boot* -- `start.sh` always runs
+it -- so the safe path is to make its inputs correct rather than to avoid it.
+
+Do not put hostnames, paths or credentials of a live deployment in this file:
+the repository is public. The invariants above are the part that transfers.
