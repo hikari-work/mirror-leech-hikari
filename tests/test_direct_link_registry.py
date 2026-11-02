@@ -386,6 +386,9 @@ def test_registry_covers_every_handler(dlg):
         "seedbox",
         "shyav",
         "kpop",
+        "x_post",
+        "instagram_post",
+        "tiktok_post",
     }
 
 
@@ -447,6 +450,11 @@ CHAIN_ORDER.append("seedbox")
 # chain already claimed.
 CHAIN_ORDER.append("shyav")
 CHAIN_ORDER.append("kpop")
+# x/instagram/tiktok (order=92-94) sit after them, for the same reason: the
+# social hosts claim their own domains and nothing in the old chain does.
+CHAIN_ORDER.append("x_post")
+CHAIN_ORDER.append("instagram_post")
+CHAIN_ORDER.append("tiktok_post")
 
 
 def test_dispatch_order_matches_the_old_chain(dlg):

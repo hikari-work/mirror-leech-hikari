@@ -49,6 +49,14 @@ from .hosts.seedbox import (
     seedbox_hosts,
 )
 from .hosts.shyav import is_shyav, shyav, shyav_resolve_download
+from .hosts.social import (
+    instagram_post,
+    is_instagram_link,
+    is_tiktok_link,
+    is_x_link,
+    tiktok_post,
+    x_post,
+)
 from .hosts.vidara import (
     VIDARA_ATTEMPTS,
     VIDARA_DOMAINS,
@@ -125,6 +133,12 @@ __all__ = [
     "is_shyav",
     "shyav",
     "shyav_resolve_download",
+    "is_x_link",
+    "is_instagram_link",
+    "is_tiktok_link",
+    "x_post",
+    "instagram_post",
+    "tiktok_post",
     "is_mega_link",
     "mega",
     "MEGA_DOMAINS",
