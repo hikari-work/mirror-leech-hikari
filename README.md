@@ -154,6 +154,9 @@ using asynchronous programming in Python.
 > ytdl),
 > tmpsend.com, qiwi.gg, berkasdrive.com, mp4upload.com, terabox.com (videos only file/folders),
 > mega.nz / mega.co.nz (folder shares and single files),
+> x.com / twitter.com (one post's photos and videos), instagram.com (post, reel or IGTV; a carousel
+> becomes one file per item), tiktok.com (the no-watermark MP4, or a slideshow's frames; short links
+> are resolved by the gateway),
 > a private seedbox (an nginx directory listing behind HTTP basic auth: list its hosts in `SEEDBOX_HOSTS` and set
 > `SEEDBOX_USERNAME` / `SEEDBOX_PASSWORD`. One link per folder, every file the listing shows is downloaded; a link
 > to a single file on the same host is downloaded with the same credentials).

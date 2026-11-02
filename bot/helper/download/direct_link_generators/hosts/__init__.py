@@ -27,6 +27,7 @@ from . import (
     sendcm,  # noqa: F401
     sharelinks,  # noqa: F401
     shyav,  # noqa: F401
+    social,  # noqa: F401
     streaming,  # noqa: F401
     swisstransfer,  # noqa: F401
     terabox,  # noqa: F401
