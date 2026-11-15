@@ -42,7 +42,7 @@ Verified against the gateway source in ``/home/stefani/api-gate``
 
 from __future__ import annotations
 
-from asyncio import create_task, gather, sleep
+from asyncio import sleep
 from collections.abc import Callable
 from dataclasses import dataclass
 from logging import getLogger
@@ -61,17 +61,15 @@ from .gateway import gateway_headers, gateway_url
 LOGGER = getLogger(__name__)
 
 _CHUNK = 1024 * 1024
-# aria2 (the direct-link path) runs --split=10 --min-split-size=10M, and the
-# PikPak CDN answers Range with 206. Fetching each resolved link over the same
-# ten connections is what closes the speed gap against `/leech <cdn-url>`.
-_CONNECTIONS = 10
-_MIN_SPLIT = 10 * 1024 * 1024
 _MAX_FILENAME_BYTES = 200
 _SHARE_HOSTS = frozenset({"mypikpak.com", "www.mypikpak.com"})
 _SHARE_SEGMENT = re_compile(r"^[A-Za-z0-9_-]+$")
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0, read=180.0, write=60.0, pool=10.0)
 # A gateway 5xx/429 is transient; share is read-only, so retrying it is safe.
 _SHARE_RETRY_STATUSES = frozenset({429, 502, 503, 504})
+# Restore calls are expensive and write to the account's drive, so only a
+# gateway answer that certainly did not finish is retried.
+_DOWNLOAD_RETRY_STATUSES = frozenset({429, 502, 504})
 _SHARE_ATTEMPTS = 3
 _MAX_RETRY_DELAY = 30.0
 # The gateway only copies text from the upstream error, so matching is textual.
@@ -103,10 +101,6 @@ class PikPakError(Exception):
         self.stale = stale
         self.status = status
         self.retry_after = retry_after
-
-
-class _RangeUnsupported(Exception):
-    """The CDN answered a ranged request without honoring it; retry as one stream."""
 
 
 @dataclass(frozen=True)
@@ -264,16 +258,15 @@ class PikPakClient:
     async def download(self, link: str, file_id: str) -> PikPakDownload:
         """Restore one share entry and return its CDN link and trusted name.
 
-        Never retried here: every call purges the account's temp folder, so the
-        caller owns the retry decision (and its lock).
+        A 429/502/504 is retried once: nothing was downloaded from the first
+        attempt, and the next call purges whatever it may have restored. A 500
+        is final -- it carries the upstream reason (expired share, quota, ...).
         """
         link = parse_share_link(link)
         if not file_id:
             raise PikPakError("PikPak returned a file without an id.")
-        data = await self._get_json(
-            "/api/v1/pikpak/download",
-            {"url": link, "file_id": file_id},
-            "download",
+        data = await self._download_json(
+            {"url": link, "file_id": file_id}
         )
         url = str(data.get("download_url") or "")
         filename = str(data.get("filename") or "")
@@ -315,133 +308,58 @@ class PikPakClient:
         url: str,
         dest: str,
         *,
-        size: int = 0,
         on_bytes: Callable[[int], None] | None = None,
         is_cancelled: Callable[[], bool] | None = None,
     ) -> int:
-        """Stream *url* into *dest* and return the byte count.
+        """Stream *url* into *dest* one chunk at a time and return the byte count.
 
-        When *size* is known and at least ``_MIN_SPLIT``, the file is fetched
-        over up to ``_CONNECTIONS`` ranged connections -- the same shape aria2
-        uses for a direct link. These are ranges of one already-resolved CDN
-        result, never extra gateway calls; the caller's gateway lock is
-        untouched. A CDN that ignores Range falls back to one stream.
+        One connection on purpose: the PikPak CDN answers concurrent Range
+        requests from this client with HTTP 503, while a single stream (or
+        aria2, which the downloader prefers) succeeds. See
+        ``pikpak_download._download_via_aria2`` for the fast path.
 
         A 404/410 is a stale result the caller may retry; anything else is a
-        reportable failure. Cancellation stops every segment and leaves the
-        partial file for the caller to remove.
+        reportable failure. Cancellation stops the stream and leaves the partial
+        file for the caller to remove.
         """
-        count = min(_CONNECTIONS, size // _MIN_SPLIT) if size else 1
+        written = 0
         try:
-            if count > 1:
-                try:
-                    return await self._download_ranges(
-                        url, dest, size, count, on_bytes, is_cancelled
-                    )
-                except _RangeUnsupported:
-                    LOGGER.info(
-                        "PikPak CDN ignored Range for %s; one connection",
-                        url.split("?", 1)[0],
-                    )
-            return await self._download_single(
-                url, dest, on_bytes, is_cancelled
-            )
+            async with self._http.stream("GET", url) as response:
+                _check_cdn_status(response, url)
+                async with aiopen(dest, "wb") as handle:
+                    async for chunk in response.aiter_bytes(_CHUNK):
+                        if is_cancelled is not None and is_cancelled():
+                            break
+                        await handle.write(chunk)
+                        written += len(chunk)
+                        if on_bytes is not None:
+                            on_bytes(len(chunk))
         except httpx.TimeoutException as exc:
             raise PikPakError("PikPak download timed out. Try again.") from exc
         except httpx.HTTPError as exc:
             LOGGER.warning("PikPak CDN request failed: %r", exc)
             raise PikPakError("PikPak download failed: network error.") from exc
-
-    async def _download_single(
-        self,
-        url: str,
-        dest: str,
-        on_bytes: Callable[[int], None] | None,
-        is_cancelled: Callable[[], bool] | None,
-    ) -> int:
-        """One whole-file stream; unchanged fallback and small-file path."""
-        written = 0
-        async with self._http.stream("GET", url) as response:
-            _check_cdn_status(response, url)
-            async with aiopen(dest, "wb") as handle:
-                async for chunk in response.aiter_bytes(_CHUNK):
-                    if is_cancelled is not None and is_cancelled():
-                        break
-                    await handle.write(chunk)
-                    written += len(chunk)
-                    if on_bytes is not None:
-                        on_bytes(len(chunk))
         return written
 
-    async def _download_ranges(
-        self,
-        url: str,
-        dest: str,
-        size: int,
-        count: int,
-        on_bytes: Callable[[int], None] | None,
-        is_cancelled: Callable[[], bool] | None,
-    ) -> int:
-        """Fetch contiguous byte ranges of one result concurrently."""
-        async with aiopen(dest, "wb"):
-            pass
-        tasks = [
-            create_task(
-                self._download_range(
-                    url, dest, start, end, on_bytes, is_cancelled
+    async def _download_json(self, params: dict[str, str]) -> dict[str, Any]:
+        """One restore call, retried once when the gateway timed out."""
+        for attempt in (1, 2):
+            try:
+                return await self._get_json(
+                    "/api/v1/pikpak/download", params, "download"
                 )
-            )
-            for start, end in _spans(size, count)
-        ]
-        try:
-            results = await gather(*tasks)
-        except BaseException:
-            for task in tasks:
-                task.cancel()
-            await gather(*tasks, return_exceptions=True)
-            raise
-        return sum(results)
-
-    async def _download_range(
-        self,
-        url: str,
-        dest: str,
-        start: int,
-        end: int,
-        on_bytes: Callable[[int], None] | None,
-        is_cancelled: Callable[[], bool] | None,
-    ) -> int:
-        """One ``Range`` segment, written at its own offset."""
-        expected = end - start + 1
-        written = 0
-        async with self._http.stream(
-            "GET", url, headers={"Range": f"bytes={start}-{end}"}
-        ) as response:
-            if response.status_code == 200:
-                # The server sent the whole file; offsets above 0 would corrupt.
-                raise _RangeUnsupported("CDN ignored Range")
-            if response.status_code == 416:
-                # The CDN's file is shorter than the gateway reported.
-                raise _RangeUnsupported("CDN rejected the range")
-            if response.status_code != 206:
-                _check_cdn_status(response, url)
-                raise _RangeUnsupported(
-                    f"CDN answered HTTP {response.status_code} for a range"
+            except PikPakError as exc:
+                if (
+                    exc.status not in _DOWNLOAD_RETRY_STATUSES
+                    or attempt == 2
+                ):
+                    raise
+                delay = min(exc.retry_after or 2.0, _MAX_RETRY_DELAY)
+                LOGGER.info(
+                    "PikPak download: %s, retrying in %.1fs", exc, delay
                 )
-            async with aiopen(dest, "r+b") as handle:
-                await handle.seek(start)
-                async for chunk in response.aiter_bytes(_CHUNK):
-                    if is_cancelled is not None and is_cancelled():
-                        break
-                    await handle.write(chunk)
-                    written += len(chunk)
-                    if on_bytes is not None:
-                        on_bytes(len(chunk))
-        if written < expected and not (
-            is_cancelled is not None and is_cancelled()
-        ):
-            raise PikPakError("PikPak CDN closed a range early.")
-        return written
+                await sleep(delay)
+        raise PikPakError("PikPak gateway error")
 
     async def _share_json(self, params: dict[str, str]) -> dict[str, Any]:
         reason = "PikPak gateway error"
@@ -526,15 +444,6 @@ def _check_cdn_status(response: httpx.Response, url: str) -> None:
             url.split("?", 1)[0],
         )
         raise PikPakError(f"PikPak CDN answered HTTP {response.status_code}.")
-
-
-def _spans(size: int, count: int) -> list[tuple[int, int]]:
-    """Contiguous, non-overlapping byte ranges; the last one takes the remainder."""
-    step = max(1, size // count)
-    return [
-        (index * step, size - 1 if index == count - 1 else (index + 1) * step - 1)
-        for index in range(count)
-    ]
 
 
 def _retry_after(response: httpx.Response, body: dict[str, Any]) -> float:

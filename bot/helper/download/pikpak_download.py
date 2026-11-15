@@ -5,9 +5,9 @@ every restore, so one result is valid only until the next call (the client modul
 documents the exact scope: global to the gateway's PikPak account, not per share
 or per user). This module therefore:
 
-* holds ``PIKPAK_DOWNLOAD_LOCK`` across the whole "call the gateway, stream the
-  CDN link to disk, hand it to the next stage" sequence -- one file at a time,
-  never ``gather`` over download calls;
+* holds ``PIKPAK_DOWNLOAD_LOCK`` across the whole "call the gateway, fetch the
+  CDN link (aria2 first, one httpx stream as fallback), hand it to the next
+  stage" sequence -- one file at a time, never ``gather`` over download calls;
 * re-lists the share once (``nocache=1``) and retries the single file when a
   result is reported stale/expired, then reports the failure;
 * names every local file from the gateway's response ``filename`` (sanitised),
@@ -23,7 +23,7 @@ a restart re-lists the share on the next attempt.
 
 from __future__ import annotations
 
-from asyncio import Lock
+from asyncio import Lock, sleep
 from os import path as ospath
 
 from aiofiles.os import makedirs, remove
@@ -32,6 +32,7 @@ from aiofiles.os import path as aiopath
 from ... import LOGGER
 from ..net.pikpak_client import (
     PikPakClient,
+    PikPakDownload,
     PikPakEntry,
     PikPakError,
     sanitize_filename,
@@ -68,6 +69,82 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
         """Progress callback for one CDN chunk."""
         self._current_downloaded += count
 
+    async def _download_cdn(self, info: PikPakDownload, dest: str) -> None:
+        """Fill *dest* from the gateway's CDN link.
+
+        aria2 is preferred because it is the same engine, options and retry
+        behaviour as ``/leech <cdn-url>``: the CDN answers this client's own
+        concurrent Range requests with HTTP 503, and one httpx stream is the
+        slow fallback when aria2 is not running.
+        """
+        if await self._download_via_aria2(info.url, dest):
+            return
+        self._current_downloaded = 0
+        await self._client.download_to(
+            info.url,
+            dest,
+            on_bytes=self._count_bytes,
+            is_cancelled=lambda: self._listener.is_cancelled,
+        )
+
+    async def _download_via_aria2(self, url: str, dest: str) -> bool:
+        """Start one aria2 download and wait it out; False means "use httpx".
+
+        The options mirror ``aria-nox.sh``: ten connections, ten-megabyte
+        pieces. They are set per download so the fallback and the rest of the
+        bot do not inherit them.
+        """
+        from ...core.torrent_manager import TorrentManager
+
+        aria2 = TorrentManager.aria2
+        if aria2 is None:
+            return False
+        options = {
+            "dir": ospath.dirname(dest),
+            "out": ospath.basename(dest),
+            "split": "10",
+            "max-connection-per-server": "10",
+            "min-split-size": "10M",
+            "allow-overwrite": "true",
+            "auto-file-renaming": "false",
+        }
+        try:
+            gid = await aria2.addUri(
+                uris=[url], options=options, position=0
+            )
+            status = await TorrentManager.aria2_status(gid)
+        except Exception as exc:
+            LOGGER.info(f"PikPak: aria2 did not start ({exc!r}); httpx stream")
+            return False
+        return await self._wait_for_aria2(gid, status, dest)
+
+    async def _wait_for_aria2(
+        self, gid: str, status: dict, dest: str
+    ) -> bool:
+        """Poll one aria2 download to completion; False means "use httpx"."""
+        from ...core.torrent_manager import TorrentManager
+
+        while True:
+            if self._listener.is_cancelled:
+                await TorrentManager.aria2_remove(status)
+                return True
+            if error := status.get("errorMessage"):
+                LOGGER.warning(f"PikPak: aria2 failed for {dest}: {error}")
+                await _drop_aria2(status, dest)
+                return False
+            if status.get("status") == "complete":
+                self._current_downloaded = _completed_length(status)
+                await TorrentManager.aria2_remove(status)
+                return True
+            self._current_downloaded = _completed_length(status)
+            await sleep(1)
+            try:
+                status = await TorrentManager.aria2_status(gid)
+            except Exception as exc:
+                LOGGER.warning(f"PikPak: aria2 status failed: {exc!r}")
+                await _drop_aria2(status, dest)
+                return False
+
     async def _fetch_file(
         self,
         share_url: str,
@@ -91,13 +168,7 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
                 info = await self._client.download(share_url, current.id)
                 local_name = _unique_name(sanitize_filename(info.filename), taken)
                 dest = ospath.join(base, local_name)
-                await self._client.download_to(
-                    info.url,
-                    dest,
-                    size=info.size,
-                    on_bytes=self._count_bytes,
-                    is_cancelled=lambda: self._listener.is_cancelled,
-                )
+                await self._download_cdn(info, dest)
                 if self._listener.is_cancelled:
                     await _discard(dest)
                     return None, "cancelled"
@@ -256,6 +327,26 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
         finally:
             if self._owns_client and self._client is not None:
                 await self._client.aclose()
+
+
+def _completed_length(status: dict) -> int:
+    """aria2 reports lengths as strings."""
+    try:
+        return max(0, int(status.get("completedLength") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _drop_aria2(status: dict, dest: str) -> None:
+    """Stop a failed aria2 job and remove what it left behind."""
+    from ...core.torrent_manager import TorrentManager
+
+    try:
+        await TorrentManager.aria2_remove(status)
+    except Exception as exc:
+        LOGGER.warning(f"PikPak: cannot remove aria2 job: {exc!r}")
+    await _discard(dest)
+    await _discard(f"{dest}.aria2")
 
 
 def _unique_name(name: str, taken: set[str]) -> str:
