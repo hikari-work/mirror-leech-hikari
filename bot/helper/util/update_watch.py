@@ -3,19 +3,19 @@
 The bot's code is replaced by ``update.py``, which ``start.sh`` runs once per
 process. A commit pushed to ``UPSTREAM_REPO``/``UPSTREAM_BRANCH`` while the bot
 is up therefore stays invisible until someone sends ``/restart``. This module
-closes that gap: it compares the branch's remote head with the local ``HEAD``,
-turns new tasks away once they differ, and restarts as soon as no task is left.
-The restarted process runs ``update.py`` again, which resets the checkout to the
-branch and starts the new code.
+closes that gap: it compares the branch's remote head with the local ``HEAD``
+and waits for a quiet moment to restart. Nothing is refused in the meantime --
+the bot keeps taking tasks, and the restart is pushed back until the ledger has
+been empty for ``IDLE_GRACE`` seconds. The restarted process runs ``update.py``
+again, which resets the checkout to the branch and starts the new code.
 
 Only the difference is watched, never the commit message or its author: the two
-hashes are the whole question. A failed lookup is not an update either -- an
-unreachable remote must not put the bot into a mode where it refuses work.
+hashes are the whole question. A failed lookup is not an update either.
 """
 
 from asyncio import sleep
 from collections.abc import Awaitable, Callable
-from typing import Protocol
+from time import monotonic
 
 from ... import LOGGER, bot_loop, task_dict, task_dict_lock
 from ...core.config_manager import Config
@@ -24,15 +24,15 @@ from .bot_utils import cmd_exec
 CHECK_INTERVAL = 60
 """Seconds between two lookups of the tracked branch."""
 
+IDLE_GRACE = 60
+"""Seconds ``task_dict`` must stay empty before the restart is allowed.
+
+A busy bot empties its ledger between one task and the next, so emptiness on
+its own is not the moment a restart costs nobody a transfer. A task that
+arrives inside this window restarts the clock.
+"""
+
 RestartHook = Callable[[], Awaitable[None]]
-
-
-class _Refusable(Protocol):
-    """What ``refuse_if_pending`` needs from the task it turns away."""
-
-    async def fail_task(
-        self, error: str | Exception, *, notify: bool = True
-    ) -> None: ...
 
 
 restart_hook: RestartHook | None = None
@@ -46,6 +46,8 @@ replacing the process.
 _pending_commit = ""
 _pending_branch = ""
 _restart_started = False
+_idle_since: float | None = None
+"""When the ledger was last seen empty, or None while a task is running."""
 _reported_error = ""
 """The last failed lookup already logged, so a dead remote is said once."""
 
@@ -146,39 +148,10 @@ async def check_once() -> str | None:
     _pending_branch = branch
     LOGGER.info(
         f"Update pending: {branch}@{remote[:7]} differs from the running"
-        f" {local[:7]}; no new task will start until the bot restarts"
+        f" {local[:7]}; the bot will restart once no task has run for"
+        f" {IDLE_GRACE} seconds"
     )
     return remote
-
-
-def update_refusal() -> str | None:
-    """Why a new task cannot start right now, or None when it can.
-
-    A refusal rather than a queue: the task would outlive the restart, and the
-    user would be waiting for a download that the next process never starts.
-    """
-    if not _pending_commit:
-        return None
-    return (
-        f"An update to {_pending_branch} ({_pending_commit[:7]}) is waiting for"
-        " the running tasks to finish, so the bot is not taking new ones."
-        " Try again after it restarts."
-    )
-
-
-async def refuse_if_pending(task: _Refusable) -> bool:
-    """Turn *task* away while an update is pending.
-
-    The early gate the command entry points call, so a user hears about the
-    update before the option keyboard and the link resolution rather than
-    after them. ``before_start`` checks again for the paths that do not come
-    through a command -- a live recording, for one.
-    """
-    reason = update_refusal()
-    if reason is None:
-        return False
-    await task.fail_task(reason)
-    return True
 
 
 async def _default_restart() -> None:
@@ -189,29 +162,43 @@ async def _default_restart() -> None:
 
 
 async def restart_if_idle() -> bool:
-    """Restart once an update is pending and nothing is running.
+    """Restart once an update is pending and the ledger has been quiet.
 
     ``task_dict`` is the whole ledger: downloading, uploading and queued tasks
-    are all in it, so an empty dict is the one moment a restart costs nobody a
-    transfer. A seeding task stays in it by design -- it is still active, and
-    the restart waits for it like it waits for any other task.
+    are all in it, so an empty dict means a restart costs nobody a transfer.
+    A seeding task stays in it by design -- it is still active, and the restart
+    waits for it like it waits for any other task.
+
+    Empty right now is not enough, because a bot that keeps taking work empties
+    between one task and the next and a task just handed to an engine may not
+    have reached the ledger yet. The ledger therefore has to stay empty for
+    ``IDLE_GRACE`` seconds. The first look starts that clock; the callers look
+    again when it has run out, and any task seen in between clears it.
 
     Returns whether a restart was started. The flag makes the several callers
     -- the periodic pass and the completion hooks of finishing tasks -- agree
     on a single restart.
     """
-    global _restart_started
+    global _restart_started, _idle_since
 
     if _restart_started or not _pending_commit:
         return False
     async with task_dict_lock:
-        if task_dict:
-            return False
+        active = bool(task_dict)
+    if active:
+        _idle_since = None
+        return False
+
+    now = monotonic()
+    if _idle_since is None:
+        _idle_since = now
+    if now - _idle_since < IDLE_GRACE:
+        return False
 
     _restart_started = True
     LOGGER.info(
         f"Restarting for {_pending_branch}@{_pending_commit[:7]}:"
-        " no task is active"
+        " no task has been active"
     )
     try:
         await (restart_hook or _default_restart)()
@@ -222,6 +209,15 @@ async def restart_if_idle() -> bool:
     return True
 
 
+async def _restart_when_quiet() -> None:
+    """Wait out the quiet window opened by a task that just finished."""
+    await restart_if_idle()
+    if _restart_started or _idle_since is None:
+        return
+    await sleep(IDLE_GRACE)
+    await restart_if_idle()
+
+
 def schedule_restart_if_idle() -> None:
     """Check for idleness now, from a synchronous caller.
 
@@ -229,10 +225,17 @@ def schedule_restart_if_idle() -> None:
     looking; waiting for the next periodic pass would delay the restart by up
     to ``CHECK_INTERVAL`` seconds for no reason. The check is skipped entirely
     when no update is pending, so the common completion path pays one truth
-    test and creates nothing.
+    test and creates nothing. While the ledger is empty this also sleeps out
+    the quiet window, so the restart lands the moment it has run out rather
+    than on the next periodic pass.
     """
+    global _idle_since
+
     if _pending_commit and not _restart_started:
-        bot_loop.create_task(restart_if_idle())
+        # The task left the ledger this instant, so the quiet window starts
+        # here rather than at whenever the ledger was last seen empty.
+        _idle_since = None
+        bot_loop.create_task(_restart_when_quiet())
 
 
 async def watch_updates() -> None:
