@@ -14,7 +14,7 @@ from ...util.exceptions import DirectDownloadLinkException  # noqa: F401
 from ...util.help_messages import PASSWORD_ERROR_MESSAGE  # noqa: F401
 from ...util.links_utils import is_share_link  # noqa: F401
 from ...util.status_utils import speed_string_to_bytes  # noqa: F401
-from ..url_shortener_bypass import bypass_shortener, is_url_shortener  # noqa: F401
+from ..url_shortener_bypass import bypass_shortener  # noqa: F401
 
 user_agent = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"

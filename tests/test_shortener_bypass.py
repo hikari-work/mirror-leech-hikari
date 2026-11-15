@@ -111,32 +111,22 @@ def _mock_session(*responses):
     return MagicMock(return_value=ctx), session, calls
 
 
-def test_is_url_shortener_covers_linkvertise_mirrors(shortener):
-    for host in (
-        "linkvertise.com",
-        "www.linkvertise.com",
-        "linkvertise.net",
-        "link-to.net",
-        "direct-link.net",
-        "up-to-down.net",
-        "file-link.net",
-        "link-target.net",
-    ):
-        assert shortener.is_url_shortener(host), host
-
-
-def test_is_url_shortener_covers_ouo(shortener):
-    assert shortener.is_url_shortener("ouo.io")
-    assert shortener.is_url_shortener("ouo.press")
-    assert shortener.is_url_shortener("www.ouo.io")
-
-
-def test_is_url_shortener_covers_bicolink(shortener):
-    # go.bicolink.net is the legacy host the gateway still accepts; bicolink.net
-    # is subdomain-matched like the rest.
-    assert shortener.is_url_shortener("bicolink.com")
-    assert shortener.is_url_shortener("bicolink.net")
-    assert shortener.is_url_shortener("go.bicolink.net")
+def test_unknown_link_answers_none_without_retry(shortener):
+    # The gateway's 400 is the only place a link is judged a shortlink or not:
+    # the bot asks, takes that answer, and holds no domain list of its own.
+    mock_cls, session, _calls = _mock_session(
+        (
+            400,
+            {
+                "success": False,
+                "error": "URL is not a supported shortlink "
+                "(linkvertise, speedy-links, ouo, bicolink, paid4link, droplink)",
+            },
+        )
+    )
+    with patch.object(shortener, "Session", mock_cls):
+        assert shortener.bypass_shortener("https://example.com/foo") is None
+    assert session.get.call_count == 1
 
 
 def test_bicolink_success_returns_target(shortener):
@@ -167,16 +157,6 @@ def test_bicolink_rate_limit_is_retried(shortener):
     assert session.get.call_count == 2
 
 
-def test_is_url_shortener_covers_paid4link(shortener: ModuleType) -> None:
-    # Every paid4link host is a subdomain of the registrable domain; the gateway's
-    # own matcher accepts all of them, so no host list is needed here.
-    assert shortener.is_url_shortener("paid4link.com")
-    assert shortener.is_url_shortener("link.paid4link.com")
-    assert shortener.is_url_shortener("go.paid4link.com")
-    assert shortener.is_url_shortener("go2.paid4link.com")
-    assert shortener.is_url_shortener("go3.paid4link.com")
-
-
 def test_paid4link_success_returns_target(shortener: ModuleType) -> None:
     mock_cls, session, calls = _mock_session(
         (200, {"success": True, "url": "https://droplink.co/ftbVWC3"})
@@ -205,13 +185,6 @@ def test_paid4link_rate_limit_is_retried(shortener: ModuleType) -> None:
 
     assert result == "https://example.com/target"
     assert session.get.call_count == 2
-
-
-def test_is_url_shortener_rejects_others(shortener):
-    # Hosts the gateway answers with 400; routing them here would only turn a
-    # working direct-link lookup into a bypass error.
-    for host in ("link-hub.net", "link-center.net", "example.com", "", None):
-        assert not shortener.is_url_shortener(host), host
 
 
 def test_linkvertise_success_returns_target(shortener):
@@ -367,7 +340,7 @@ def test_ouo_failure_is_named_and_clipped(shortener):
         shortener.bypass_shortener("https://ouo.io/gone")
 
     message = str(excinfo.value)
-    assert message.startswith("ERROR: ouo bypass failed: ouo: _token not found")
+    assert message.startswith("ERROR: Bypass failed: ouo: _token not found")
     assert "\n" not in message
     assert len(message) < shortener._MAX_REASON + 60
     assert session.get.call_count == 1
@@ -386,6 +359,10 @@ def test_ouo_rate_limit_is_retried(shortener):
 
 
 def test_bypass_shortener_unknown_domain(shortener):
-    with pytest.raises(Exception) as excinfo:
-        shortener.bypass_shortener("https://example.com/foo")
-    assert "No bypasser" in str(excinfo.value)
+    # No domain list here: the gateway's 400 comes back as None, and the caller
+    # falls through to the host handlers.
+    mock_cls, _session, _calls = _mock_session(
+        (400, {"success": False, "error": "URL is not a supported shortlink"})
+    )
+    with patch.object(shortener, "Session", mock_cls):
+        assert shortener.bypass_shortener("https://example.com/foo") is None

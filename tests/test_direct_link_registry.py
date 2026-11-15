@@ -102,8 +102,7 @@ def dlg(monkeypatch):
     shortener_mod = ModuleType(
         "bot.helper.download.url_shortener_bypass"
     )
-    shortener_mod.bypass_shortener = lambda url: url
-    shortener_mod.is_url_shortener = lambda domain: False
+    shortener_mod.bypass_shortener = lambda url: None
 
     stubs = {
         "bot": bot_pkg,
@@ -356,6 +355,20 @@ def test_generator_reports_unknown_domain(dlg):
     with pytest.raises(Exception) as excinfo:
         dlg.direct_link_generator("https://example.com/file")
     assert "No Direct link function found" in str(excinfo.value)
+
+
+def test_generator_asks_the_gateway_for_unknown_hosts(dlg, monkeypatch):
+    # No local domain list decides this: a host with no handler is handed to the
+    # gateway, and its None answer is what raises the "no direct link" error.
+    asked = []
+    monkeypatch.setattr(
+        dlg, "bypass_shortener", lambda link: asked.append(link) or None
+    )
+
+    with pytest.raises(Exception):
+        dlg.direct_link_generator("https://example.com/file")
+
+    assert asked == ["https://example.com/file"]
 
 
 def test_generator_rejects_url_without_host(dlg):

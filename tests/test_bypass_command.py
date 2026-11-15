@@ -68,8 +68,7 @@ def bypass_cmd(monkeypatch):
     talks to, so a test can assert on what the user was actually shown.
     """
     stubs = SimpleNamespace(
-        is_url_shortener=MagicMock(return_value=False),
-        bypass_shortener=MagicMock(return_value=""),
+        bypass_shortener=MagicMock(return_value=None),
         is_scrape_target=MagicMock(return_value=False),
         bypass_scrape=AsyncMock(return_value=("Thread", [], 3)),
         send_message=AsyncMock(),
@@ -116,7 +115,6 @@ def bypass_cmd(monkeypatch):
 
     shortener_mod = ModuleType(f"{_DU}.url_shortener_bypass")
     shortener_mod.bypass_shortener = stubs.bypass_shortener
-    shortener_mod.is_url_shortener = stubs.is_url_shortener
 
     message_utils = ModuleType("bot.helper.telegram.message_utils")
     message_utils.send_message = stubs.send_message
@@ -170,14 +168,13 @@ def test_is_scrape_target(dispatcher):
 
 async def test_shortlink_answered_with_target(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.side_effect = lambda host: host == "linkvertise.com"
     stubs.bypass_shortener.return_value = "https://mega.nz/file/abc#key"
 
     await module.bypass_scrape_cmd(
         MagicMock(), _message("/bypass https://linkvertise.com/12345/slug")
     )
 
-    stubs.bypass_shortener.assert_called_once_with(
+    stubs.bypass_shortener.assert_any_call(
         "https://linkvertise.com/12345/slug"
     )
     assert "https://mega.nz/file/abc#key" in _shown(stubs.edit_message)[-1]
@@ -185,37 +182,29 @@ async def test_shortlink_answered_with_target(bypass_cmd):
     stubs.bypass_scrape.assert_not_awaited()
 
 
-def _host_shortener(hosts):
-    """A stand-in for ``is_url_shortener`` that knows exactly ``hosts``."""
-    return lambda host: host in hosts
-
-
 async def test_nested_shortlinks_are_followed_to_the_end(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.side_effect = _host_shortener(
-        {"linkvertise.com", "ouo.io"}
-    )
     chain = {
         "https://linkvertise.com/1/first": "https://ouo.io/second",
         "https://ouo.io/second": "https://linkvertise.com/2/third",
         "https://linkvertise.com/2/third": "https://mega.nz/file/abc#key",
     }
-    stubs.bypass_shortener.side_effect = chain.__getitem__
+    # A missing key is None: the gateway has no resolver for that link, which is
+    # what ends the chain.
+    stubs.bypass_shortener.side_effect = chain.get
 
     await module.bypass_scrape_cmd(
         MagicMock(), _message("/bypass https://linkvertise.com/1/first")
     )
 
-    assert stubs.bypass_shortener.call_count == 3
+    # Three hops resolved, then one more call that answers None for the mega URL.
+    assert stubs.bypass_shortener.call_count == 4
     assert "https://mega.nz/file/abc#key" in _shown(stubs.edit_message)[-1]
     stubs.bypass_scrape.assert_not_awaited()
 
 
 async def test_chain_failure_shows_the_last_resolved_link(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.side_effect = _host_shortener(
-        {"linkvertise.com", "ouo.io"}
-    )
     chain = {
         "https://linkvertise.com/1/first": "https://ouo.io/second",
         "https://ouo.io/second": "https://linkvertise.com/2/third",
@@ -245,9 +234,6 @@ async def test_chain_failure_shows_the_last_resolved_link(bypass_cmd):
 
 async def test_shortlink_cycle_stops_at_the_last_hop(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.side_effect = _host_shortener(
-        {"linkvertise.com", "ouo.io"}
-    )
     chain = {
         "https://linkvertise.com/1/a": "https://ouo.io/b",
         "https://ouo.io/b": "https://linkvertise.com/1/a",
@@ -266,7 +252,6 @@ async def test_shortlink_cycle_stops_at_the_last_hop(bypass_cmd):
 
 async def test_shortlink_target_is_html_escaped(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.return_value = True
     stubs.bypass_shortener.return_value = "https://host/f?a=1&b=2"
 
     await module.bypass_scrape_cmd(MagicMock(), _message("/bypass https://ouo.io/x"))
@@ -277,9 +262,10 @@ async def test_shortlink_target_is_html_escaped(bypass_cmd):
 
 async def test_shortlink_onto_thread_continues_into_page_prompt(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.return_value = True
     stubs.bypass_shortener.return_value = "https://semprot.com/threads/foo.1/"
-    stubs.is_scrape_target.return_value = True
+    stubs.is_scrape_target.side_effect = (
+        lambda url: url == "https://semprot.com/threads/foo.1/"
+    )
 
     # The page prompt waits on the user's next message; time it out at once.
     async def _no_reply(*_args, **_kwargs):
@@ -300,7 +286,6 @@ async def test_shortlink_onto_thread_continues_into_page_prompt(bypass_cmd):
 
 async def test_shortlink_failure_is_reported(bypass_cmd):
     module, stubs = bypass_cmd
-    stubs.is_url_shortener.return_value = True
     stubs.bypass_shortener.side_effect = _DirectDownloadLinkException(
         "ERROR: linkvertise bypass failed: Content Not Found."
     )
@@ -315,6 +300,9 @@ async def test_shortlink_failure_is_reported(bypass_cmd):
 
 async def test_plain_thread_url_skips_the_shortener(bypass_cmd):
     module, stubs = bypass_cmd
+    stubs.is_scrape_target.side_effect = (
+        lambda url: url == "https://semprot.com/threads/foo.1/"
+    )
 
     async def _no_reply(*_args, **_kwargs):
         return None

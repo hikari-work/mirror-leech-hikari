@@ -1,57 +1,23 @@
 """URL shortener bypassers.
 
-Each handler resolves a shortened URL back to its underlying target URL.
-Handlers are pure resolvers: input a shortened URL, output the target URL
-string (or raise DirectDownloadLinkException). The caller in
-direct_link_generator.py is responsible for re-dispatching the returned URL
-through the regular host handlers.
+Resolves a shortened URL back to its underlying target URL through the
+gateway's unified ``/api/v2/bypass``. The bot keeps no list of shortener
+domains and does no validation of its own: that endpoint picks the resolver
+from the URL and answers 400 for anything it does not know, and that answer is
+what sends a link to the regular host handlers instead. The caller in
+direct_link_generator.py re-dispatches the resolved URL through those handlers.
 """
 
 from random import uniform
 from re import search
 from time import sleep
-from urllib.parse import urlparse
 
 from requests import Session
 
 from ..net.gateway import gateway_headers, gateway_url
 from ..util.exceptions import DirectDownloadLinkException
 
-_OUO_DOMAINS = ("ouo.io", "ouo.press")
-
-# Mirror domains the gateway's /bypass/linkvertise accepts. Handing it a host it
-# doesn't know earns a 400, so keep this in step with the gateway — notably
-# link-hub.net and link-center.net are Linkvertise fronts it currently rejects.
-_LINKVERTISE_DOMAINS = (
-    "linkvertise.com",
-    "linkvertise.net",
-    "link-to.net",
-    "direct-link.net",
-    "up-to-down.net",
-    "file-link.net",
-    "link-target.net",
-)
-_BICOLINK_DOMAINS = (
-    "bicolink.com",
-    "bicolink.net",
-)
-# paid4link serves links from go/go2/go3/link subdomains; the subdomain match
-# covers them all, and the gateway accepts every one.
-_PAID4LINK_DOMAINS = ("paid4link.com",)
-
-# (name, domains it owns, gateway endpoint). All four shorteners gate the
-# destination behind a flow the gateway already walks for us — ouo's CSRF chain
-# behind Cloudflare, Linkvertise's GraphQL API, bicolink's ad gate plus its
-# wp-safelink blog, paid4link's Cloudflare origin — so none is scraped here.
-# bicolink's walk carries a ~10 s settle sleep the target itself imposes, and
-# paid4link's reads the zone's SPF record before walking the origin, so their
-# endpoints are the slow ones.
-_BYPASSERS = (
-    ("ouo", _OUO_DOMAINS, "/api/v1/bypass/ouo"),
-    ("linkvertise", _LINKVERTISE_DOMAINS, "/api/v1/bypass/linkvertise"),
-    ("bicolink", _BICOLINK_DOMAINS, "/api/v1/bypass/bicolink"),
-    ("paid4link", _PAID4LINK_DOMAINS, "/api/v1/bypass/paid4link"),
-)
+_BYPASS_PATH = "/api/v2/bypass"
 
 _GATEWAY_ATTEMPTS = 3
 _GATEWAY_TIMEOUT = 60
@@ -59,6 +25,9 @@ _GATEWAY_MAX_RETRY_DELAY = 30
 # 500 is deliberately absent: the gateway answers a dead shortlink with
 # 500 + "Content Not Found", and retrying that only triples the wait.
 _RETRY_STATUSES = (408, 425, 429, 502, 503, 504)
+# The gateway's answer for a link it has no resolver for. The bot holds no list
+# of its own, so this status is what routes the link to the host handlers.
+_UNSUPPORTED_STATUS = 400
 _TRANSIENT_HINTS = (
     "rate limit",
     "rate-limit",
@@ -73,29 +42,6 @@ _URL_IN_TEXT = r"https?://[^\s\"'<>]+"
 # Some gateway errors quote the whole fetched page back — ouo does that when the
 # CSRF token is missing — so clamp what ends up in the user's chat.
 _MAX_REASON = 300
-
-
-def _matches(domain, domains):
-    """True when ``domain`` is one of ``domains`` or a subdomain of one."""
-    domain = (domain or "").lower()
-    return any(domain == d or domain.endswith(f".{d}") for d in domains)
-
-
-def is_url_shortener(domain):
-    return any(_matches(domain, domains) for _name, domains, _path in _BYPASSERS)
-
-
-def bypass_shortener(link):
-    domain = (urlparse(link).hostname or "").lower()
-    for name, domains, path in _BYPASSERS:
-        if _matches(domain, domains):
-            return _gateway_bypass(name, path, link)
-    raise DirectDownloadLinkException(f"ERROR: No bypasser for {domain}")
-
-
-def _gateway(path):
-    """(url, headers) for a gateway endpoint."""
-    return gateway_url(path), gateway_headers()
 
 
 def _transient(reason):
@@ -140,21 +86,24 @@ def _target(payload):
 
 
 def _gateway_request(session, api, headers, link):
-    """Return (target, reason, retryable, retry_after).
+    """Return (target, reason, retryable, retry_after, known).
 
-    A gateway hiccup or a rate limit is worth another attempt; a shortlink whose
-    content is gone is not — the gateway reports that as 500, so the retry
-    decision leans on the error text rather than the status alone.
+    ``known`` is False for the gateway's 400: it does not recognise the link as
+    one of its shortlinks, which is the only place that is decided. A gateway
+    hiccup or a rate limit is worth another attempt; a shortlink whose content
+    is gone is not — the gateway reports that as 500, so the retry decision
+    leans on the error text rather than the status alone.
     """
     try:
         resp = session.get(
             api, params={"url": link}, headers=headers, timeout=_GATEWAY_TIMEOUT
         )
     except Exception as e:
-        return None, e.__class__.__name__, True, None
+        return None, e.__class__.__name__, True, None, True
 
     retry_after = resp.headers.get("Retry-After")
     retryable = resp.status_code in _RETRY_STATUSES
+    known = resp.status_code != _UNSUPPORTED_STATUS
 
     try:
         payload = resp.json()
@@ -162,36 +111,44 @@ def _gateway_request(session, api, headers, link):
         payload = None
     if not isinstance(payload, dict):
         reason = f"HTTP {resp.status_code} (non-JSON response)"
-        return None, reason, retryable, retry_after
+        return None, reason, retryable, retry_after, known
 
     if not payload.get("success"):
         reason = payload.get("error") or f"HTTP {resp.status_code}"
-        return None, reason, retryable or _transient(reason), retry_after
+        retryable = retryable or (known and _transient(reason))
+        return None, reason, retryable, retry_after, known
 
     if target := _target(payload):
-        return target, None, False, None
+        return target, None, False, None, True
 
     body = (payload.get("url") or "").strip()
     reason = "no target URL in response"
     if body:
         reason += f" (paste content: {body[:200]})"
-    return None, reason, False, None
+    return None, reason, False, None, True
 
 
-def _gateway_bypass(name, path, link):
-    """Resolve a shortlink via one of the gateway's /bypass endpoints."""
-    api, headers = _gateway(path)
+def bypass_shortener(link: str) -> str | None:
+    """Resolve a link through the gateway's unified /api/v2/bypass.
+
+    Returns the target URL, or None when the gateway says the link is not a
+    shortlink it knows — the caller then falls through to the host handlers.
+    """
+    api = gateway_url(_BYPASS_PATH)
+    headers = gateway_headers()
     reason = "unknown error"
 
     with Session() as session:
         for attempt in range(1, _GATEWAY_ATTEMPTS + 1):
-            target, reason, retryable, retry_after = _gateway_request(
+            target, reason, retryable, retry_after, known = _gateway_request(
                 session, api, headers, link
             )
             if target:
                 return target
+            if not known:
+                return None
             if not retryable or attempt == _GATEWAY_ATTEMPTS:
                 break
             sleep(_retry_delay(attempt, retry_after))
 
-    raise DirectDownloadLinkException(f"ERROR: {name} bypass failed: {_clip(reason)}")
+    raise DirectDownloadLinkException(f"ERROR: Bypass failed: {_clip(reason)}")

@@ -2,10 +2,10 @@
 
 from requests import get as http_get
 
-from .._common import DirectDownloadLinkException
+from .._common import DirectDownloadLinkException, gateway_headers, gateway_url
 from ..registry import register
 
-IMGBB_API = "https://api.piyann.me/api/v1/scrape/imgbb"
+IMGBB_PATH = "/api/v1/scrape/imgbb"
 
 IMGBB_DOMAINS = ("ibb.co.com", "ibb.co", "imgbb.com")
 
@@ -21,7 +21,12 @@ def is_imgbb_link(url: str) -> bool:
 def imgbb(url: str) -> str:
     """Resolve an ImgBB page URL to a direct download link."""
     try:
-        resp = http_get(IMGBB_API, params={"q": url}, timeout=30)
+        resp = http_get(
+            gateway_url(IMGBB_PATH),
+            params={"q": url},
+            headers=gateway_headers(),
+            timeout=30,
+        )
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
