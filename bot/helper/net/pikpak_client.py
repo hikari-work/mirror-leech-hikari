@@ -9,7 +9,7 @@ Verified against the gateway source in ``/home/stefani/api-gate``
 * ``GET /api/v1/pikpak/share?url=<share link>`` answers
   ``{success, share_id, total_files, files[{id, name, kind, is_folder, size,
   mime_type, parent_id}], error, timestamp, duration_ms}``. Read-only and
-  recursive (gateway caps: 5000 files, depth 8).
+  recursive, with no file-count or folder-depth cap.
 * ``GET /api/v1/pikpak/download?url=<same share link>&file_id=<id>`` answers
   ``{success, download_url, file_id, filename, file_size, expires_at, purged,
   error, timestamp, duration_ms}``. ``file_id`` is the id the file has in the
