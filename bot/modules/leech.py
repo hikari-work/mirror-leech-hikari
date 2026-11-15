@@ -23,10 +23,14 @@ from ..helper.download.link_resolver import (
     resolve_torbox_web,
     resolve_alldebrid_web,
     resolve_direct_link,
+    resolve_pikpak,
     resolve_pornhub,
 )
 from ..helper.download.mega_download import (
     add_mega_download,
+)
+from ..helper.download.pikpak_download import (
+    add_pikpak_download,
 )
 from ..helper.download.pornhub_download import (
     add_pornhub_download,
@@ -265,6 +269,10 @@ class Leech(CommandTask):
                     return False
 
             if isinstance(self.link, str):
+                if not await resolve_pikpak(self):
+                    return False
+
+            if isinstance(self.link, str):
                 result = await resolve_direct_link(self, headers)
                 if result is None:
                     return False
@@ -291,6 +299,8 @@ class Leech(CommandTask):
                 engine = "pornhub"
             elif self.link.get("vidara"):
                 engine = "vidara"
+            elif self.link.get("pikpak"):
+                engine = "pikpak"
             else:
                 engine = "direct"
         elif self.is_qbit:
@@ -319,6 +329,8 @@ class Leech(CommandTask):
                 await add_pornhub_download(self, path)
             elif self.link.get("vidara"):
                 await add_vidara_download(self, path)
+            elif self.link.get("pikpak"):
+                await add_pikpak_download(self, path)
             else:
                 await add_direct_download(self, path)
         elif self.is_qbit:
