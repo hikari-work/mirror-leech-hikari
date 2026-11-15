@@ -138,7 +138,7 @@ def test_bicolink_success_returns_target(shortener):
 
     assert result == "https://mega.nz/file/abc#key"
     url, kwargs = calls[0]
-    assert url == "https://api.piyann.me/api/v1/bypass/bicolink"
+    assert url == "https://api.piyann.my.id/api/v2/bypass"
     assert kwargs["params"] == {"url": "https://bicolink.com/Zjl2r"}
     assert session.get.call_count == 1
 
@@ -166,7 +166,7 @@ def test_paid4link_success_returns_target(shortener: ModuleType) -> None:
 
     assert result == "https://droplink.co/ftbVWC3"
     url, kwargs = calls[0]
-    assert url == "https://api.piyann.me/api/v1/bypass/paid4link"
+    assert url == "https://api.piyann.my.id/api/v2/bypass"
     # The gateway resolves every host, including subdomains, so the link is
     # handed over untouched.
     assert kwargs["params"] == {"url": "https://go.paid4link.com/cF0S4"}
@@ -196,7 +196,7 @@ def test_linkvertise_success_returns_target(shortener):
 
     assert result == "https://mega.nz/file/abc#key"
     url, kwargs = calls[0]
-    assert url == "https://api.piyann.me/api/v1/bypass/linkvertise"
+    assert url == "https://api.piyann.my.id/api/v2/bypass"
     assert kwargs["params"] == {"url": "https://linkvertise.com/12345/my-slug"}
     assert session.get.call_count == 1
 
@@ -211,7 +211,7 @@ def test_linkvertise_honours_configured_gateway_and_token(shortener, gateway_con
         shortener.bypass_shortener("https://link-to.net/12345/my-slug")
 
     url, kwargs = calls[0]
-    assert url == "https://gw.example.com/api/v1/bypass/linkvertise"
+    assert url == "https://gw.example.com/api/v2/bypass"
     assert kwargs["headers"]["Authorization"] == "Bearer secret"
 
 
@@ -304,7 +304,7 @@ def test_ouo_success_returns_target(shortener):
 
     assert result == "https://drive.google.com/file/d/abc/view"
     url, kwargs = calls[0]
-    assert url == "https://api.piyann.me/api/v1/bypass/ouo"
+    assert url == "https://api.piyann.my.id/api/v2/bypass"
     assert kwargs["params"] == {"url": "https://ouo.io/abc123"}
     assert session.get.call_count == 1
 
