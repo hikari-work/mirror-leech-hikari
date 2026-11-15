@@ -5,13 +5,12 @@ branch is invisible to a running bot. The watcher closes that gap in two
 steps, and both are pinned here:
 
 * the remote head is compared with the local one, and a difference -- and
-  only a difference -- puts the bot into the "no new tasks" state;
-* once that state is set, a restart happens as soon as ``task_dict`` is
-  empty, and not a moment sooner.
+  only a difference -- marks an update as waiting;
+* once one is waiting, a restart happens only after ``task_dict`` has stayed
+  empty for the quiet window, and not a moment sooner.
 
-The refusals themselves live in ``before_start`` and in the early gate the
-command entry points call, so the last tests check that a pending update
-reaches a user and that restart recovery is exempt from it.
+Nothing turns new tasks away in the meantime: they are admitted as usual and
+simply postpone the restart, which is what the last tests check.
 """
 
 from __future__ import annotations
@@ -22,8 +21,6 @@ import pytest
 
 import bot.helper.util.update_watch as uw
 from bot.core.config_manager import Config
-from bot.helper.listeners.command_task import CommandTask
-from bot.helper.task.settings_resolver import SettingsResolverMixin
 
 LOCAL = "a" * 40
 REMOTE = "b" * 40
@@ -35,6 +32,8 @@ def watch(monkeypatch):
     monkeypatch.setattr(uw, "_pending_commit", "")
     monkeypatch.setattr(uw, "_pending_branch", "")
     monkeypatch.setattr(uw, "_restart_started", False)
+    monkeypatch.setattr(uw, "_idle_since", None)
+    monkeypatch.setattr(uw, "IDLE_GRACE", 0)
     monkeypatch.setattr(uw, "_reported_error", "")
     monkeypatch.setattr(uw, "restart_hook", None)
     monkeypatch.setattr(uw, "task_dict", {})
@@ -70,6 +69,10 @@ def _failures():
     return hook, called
 
 
+async def _no_sleep(_seconds):
+    """Stand-in for the quiet-window sleep in a test with a fake clock."""
+
+
 def _pending(monkeypatch):
     """Put the watcher in the state a detected update leaves it in.
 
@@ -78,16 +81,6 @@ def _pending(monkeypatch):
     """
     monkeypatch.setattr(uw, "_pending_commit", REMOTE)
     monkeypatch.setattr(uw, "_pending_branch", "main")
-
-
-class _Task:
-    """The slice of a listener ``refuse_if_pending`` uses."""
-
-    def __init__(self):
-        self.errors = []
-
-    async def fail_task(self, error, *, notify=True):
-        self.errors.append(error)
 
 
 # ── detection ───────────────────────────────────────────────────────
@@ -105,28 +98,24 @@ async def test_a_different_remote_head_marks_the_update_pending(monkeypatch):
     _git(monkeypatch)
 
     assert await uw.check_once() == REMOTE
-    assert uw.update_refusal() is not None
 
 
 async def test_the_same_head_is_not_an_update(monkeypatch):
     _git(monkeypatch, remote=LOCAL)
 
     assert await uw.check_once() is None
-    assert uw.update_refusal() is None
 
 
 async def test_an_unreachable_remote_is_not_an_update(monkeypatch):
     _git(monkeypatch, remote_code=128)
 
     assert await uw.check_once() is None
-    assert uw.update_refusal() is None
 
 
 async def test_a_checkout_without_a_commit_is_not_an_update(monkeypatch):
     _git(monkeypatch, local="", local_code=128)
 
     assert await uw.check_once() is None
-    assert uw.update_refusal() is None
 
 
 async def test_the_lookup_stops_once_a_commit_is_pending(monkeypatch):
@@ -138,14 +127,12 @@ async def test_the_lookup_stops_once_a_commit_is_pending(monkeypatch):
     assert len(calls) == asked
 
 
-async def test_the_refusal_names_the_branch_and_the_commit(monkeypatch):
+async def test_the_pending_state_names_the_branch_and_the_commit(monkeypatch):
     _git(monkeypatch)
     await uw.check_once()
 
-    message = uw.update_refusal()
-
-    assert "main" in message
-    assert REMOTE[:7] in message
+    assert uw._pending_branch == "main"
+    assert uw._pending_commit == REMOTE
 
 
 # ── restarting ──────────────────────────────────────────────────────
@@ -236,72 +223,64 @@ async def test_the_loop_ends_after_handing_over_to_the_restart(monkeypatch):
     assert called == [True]
 
 
-# ── refusing tasks ──────────────────────────────────────────────────
+async def test_a_task_left_in_the_ledger_blanks_the_quiet_window(monkeypatch):
+    """A task that starts after the first empty look restarts the clock.
 
-
-async def test_the_early_gate_turns_a_command_away(monkeypatch):
-    _pending(monkeypatch)
-    task = _Task()
-
-    assert await uw.refuse_if_pending(task) is True
-    assert task.errors and "main" in task.errors[0]
-
-
-async def test_the_early_gate_lets_a_command_through_when_current(monkeypatch):
-    task = _Task()
-
-    assert await uw.refuse_if_pending(task) is False
-    assert task.errors == []
-
-
-class _Listener(SettingsResolverMixin):
-    """What ``before_start`` needs before it reaches the first decision."""
-
-    def __init__(self):
-        self.user_id = 42
-        self.destination = "s3"
-
-
-def _stub_resolution(monkeypatch, listener):
-    """Make ``before_start`` stop at the gate instead of resolving settings."""
-    for name in (
-        "_resolve_name_substitutions",
-        "_resolve_extension_filters",
-        "_resolve_ffmpeg_commands",
-        "_resolve_s3_destination",
-    ):
-        monkeypatch.setattr(listener, name, lambda: None)
-
-
-async def test_before_start_refuses_a_new_task_while_pending(monkeypatch):
-    _pending(monkeypatch)
-    listener = _Listener()
-    _stub_resolution(monkeypatch, listener)
-
-    with pytest.raises(ValueError, match="update"):
-        await listener.before_start()
-
-
-async def test_restart_recovery_is_not_refused_by_a_pending_update(monkeypatch):
-    """A task that was already admitted comes back even mid-update."""
-    _pending(monkeypatch)
-    listener = _Listener()
-    _stub_resolution(monkeypatch, listener)
-
-    await listener.before_start(enforce_user_limit=False)
-
-
-async def test_a_task_admitted_earlier_is_stopped_before_its_engine(monkeypatch):
-    """The last admission check is the one right before the engine call.
-
-    A task can be admitted, then spend a while resolving its link. If the
-    update is detected in that window it must not start the download the
-    restart is about to kill.
+    Without it, a ledger that was empty a minute ago and is empty again now
+    would restart even though a task ran and finished in between.
     """
+    clock = [0.0]
+    monkeypatch.setattr(uw, "IDLE_GRACE", 30)
+    monkeypatch.setattr(uw, "monotonic", lambda: clock[0])
     _pending(monkeypatch)
-    task = _Task()
+    hook, called = _failures()
+    monkeypatch.setattr(uw, "restart_hook", hook)
 
-    admitted = await CommandTask.record_active_task(task, None, "leech", "aria2")
+    assert await uw.restart_if_idle() is False
+    uw.task_dict[1] = object()
+    clock[0] = 5
+    assert await uw.restart_if_idle() is False
+    del uw.task_dict[1]
+    clock[0] = 20
+    assert await uw.restart_if_idle() is False
+    clock[0] = 49
+    assert await uw.restart_if_idle() is False
+    clock[0] = 50
+    assert await uw.restart_if_idle() is True
+    assert called == [True]
 
-    assert admitted is False
-    assert task.errors and "main" in task.errors[0]
+
+async def test_a_finished_task_reopens_the_quiet_window(monkeypatch):
+    """The window starts at the completion, not the last time it looked empty."""
+    clock = [0.0]
+    monkeypatch.setattr(uw, "IDLE_GRACE", 30)
+    monkeypatch.setattr(uw, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(uw, "bot_loop", asyncio.get_running_loop())
+    monkeypatch.setattr(uw, "sleep", _no_sleep)
+    _pending(monkeypatch)
+    hook, called = _failures()
+    monkeypatch.setattr(uw, "restart_hook", hook)
+
+    assert await uw.restart_if_idle() is False
+    clock[0] = 5
+    uw.schedule_restart_if_idle()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    clock[0] = 34
+    assert await uw.restart_if_idle() is False
+    clock[0] = 35
+    assert await uw.restart_if_idle() is True
+    assert called == [True]
+
+
+async def test_a_new_task_is_admitted_while_the_update_waits(monkeypatch):
+    """Nothing refuses work: a task arriving mid-wait only postpones the restart."""
+    _pending(monkeypatch)
+    hook, called = _failures()
+    monkeypatch.setattr(uw, "restart_hook", hook)
+
+    uw.task_dict[1] = object()
+
+    assert await uw.restart_if_idle() is False
+    assert called == []
+    assert uw._pending_commit == REMOTE

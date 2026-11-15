@@ -10,7 +10,6 @@ from ..helper.util.links_utils import (
     is_telegram_link,
 )
 from ..helper.util.task_args import parse_leech_args, strip_link_tokens
-from ..helper.util.update_watch import refuse_if_pending
 from ..helper.listeners.command_task import CommandTask
 from ..helper.download.aria2_download import (
     add_aria2_download,
@@ -53,12 +52,6 @@ from ..helper.telegram.task_options import ask_options
 
 class Leech(CommandTask):
     async def new_event(self):
-        # Before parsing, the option keyboard or a scrape: while a new commit
-        # is waiting for the restart, this is the quickest answer that costs
-        # the task no work. ``before_start`` checks again for live recordings
-        # and anything else that does not enter through a command.
-        if await refuse_if_pending(self):
-            return
         text = self.cmd_text.split("\n")
         input_list = text[0].split(" ")
 
