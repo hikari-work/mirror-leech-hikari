@@ -271,3 +271,30 @@ async def resolve_pornhub(listener) -> bool:
     listener.link = resolved
     LOGGER.info(f"PornHub resolved: {url_type} {identifier}")
     return True
+
+
+async def resolve_pikpak(listener) -> bool:
+    """Parse a mypikpak.com share link into a PikPak link dict.
+
+    Returns *True* when the link is not PikPak (nothing to do) and on success.
+    A malformed PikPak link ends the task with a user-facing reason, so it never
+    falls through to the generic shortlink resolver.
+    """
+    from ..net.pikpak_client import (
+        PikPakError,
+        is_pikpak_link,
+        parse_share_link,
+        share_id_of,
+    )
+
+    if not isinstance(listener.link, str) or not is_pikpak_link(listener.link):
+        return True
+    try:
+        url = parse_share_link(listener.link)
+    except PikPakError as exc:
+        await _fail(listener, exc, notify=True)
+        return False
+    share_id = share_id_of(url)
+    listener.link = {"pikpak": {"url": url, "share_id": share_id}}
+    LOGGER.info(f"PikPak share parsed: {share_id}")
+    return True
