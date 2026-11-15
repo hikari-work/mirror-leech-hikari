@@ -12,7 +12,8 @@ or per user). This module therefore:
   result is reported stale/expired, then reports the failure;
 * names every local file from the gateway's response ``filename`` (sanitised),
   never from the share listing's display name;
-* counts progress in bytes and sends "File i/n" to the user before each file.
+* counts progress in bytes for the task status line; per-file notices are
+  log-only, like the other engines, so a 30-file share sends no chat spam.
 
 Per-job state is the task itself: the original share link lives in
 ``listener.link["pikpak"]`` and the listing's file ids are held by this helper
@@ -23,7 +24,6 @@ a restart re-lists the share on the next attempt.
 from __future__ import annotations
 
 from asyncio import Lock
-from html import escape
 from os import path as ospath
 
 from aiofiles.os import makedirs, remove
@@ -36,7 +36,6 @@ from ..net.pikpak_client import (
     PikPakError,
     sanitize_filename,
 )
-from ..telegram.message_utils import send_message
 from ..util.resolve_gate import resolve_gate
 from .multi_video_download import MultiVideoDownloadHelper
 
@@ -69,15 +68,6 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
         """Progress callback for one CDN chunk."""
         self._current_downloaded += count
 
-    async def _notify_file(self, index: int, total: int, name: str) -> None:
-        """Tell the user which file is next; the listing name is display-only."""
-        label = escape(name or "file")
-        LOGGER.info(f"PikPak: file {index}/{total} {name or ''}")
-        if self._listener.message is not None:
-            await send_message(
-                self._listener.message, f"PikPak: file {index}/{total} — {label}"
-            )
-
     async def _fetch_file(
         self,
         share_url: str,
@@ -104,6 +94,7 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
                 await self._client.download_to(
                     info.url,
                     dest,
+                    size=info.size,
                     on_bytes=self._count_bytes,
                     is_cancelled=lambda: self._listener.is_cancelled,
                 )
@@ -159,7 +150,9 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
         for index, entry in enumerate(files, 1):
             if self._listener.is_cancelled:
                 break
-            await self._notify_file(index, len(files), entry.name)
+            LOGGER.info(
+                f"PikPak: file {index}/{len(files)} {entry.name or entry.id}"
+            )
             async with PIKPAK_DOWNLOAD_LOCK:
                 if self._listener.is_cancelled:
                     break
@@ -173,22 +166,11 @@ class PikPakDownloadHelper(MultiVideoDownloadHelper):
                     f"PikPak: file {index}/{len(files)} failed: "
                     f"{label} ({failure})"
                 )
-                if not self._listener.is_cancelled:
-                    await self._report_failure(index, len(files), failure)
                 continue
             self._done_count += 1
             if self._single_file and local_name:
                 self._listener.name = local_name
         return failures
-
-    async def _report_failure(self, index: int, total: int, failure: str) -> None:
-        """One user-facing line per failed file; the task decides the rest."""
-        if self._listener.message is None:
-            return
-        await send_message(
-            self._listener.message,
-            f"PikPak: file {index}/{total} failed — {escape(failure)}",
-        )
 
     async def _list_files(
         self, share_url: str, share_id: str
