@@ -11,6 +11,7 @@ import pytest
 
 from bot.core.config_manager import Config
 from bot.helper.download import pikpak_download
+from bot.helper.net import pikpak_client
 from bot.helper.net.pikpak_client import (
     PikPakClient,
     PikPakEntry,
@@ -171,6 +172,59 @@ async def test_download_to_streams_bytes_and_marks_gone_stale(tmp_path):
         assert caught.value.stale
 
 
+async def test_download_to_ranges_one_result_over_many_connections(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pikpak_client, "_MIN_SPLIT", 1024)
+    monkeypatch.setattr(pikpak_client, "_CONNECTIONS", 4)
+    payload = bytes(range(256)) * 16  # 4096 bytes
+    ranges: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        header = request.headers.get("range", "")
+        ranges.append(header)
+        start, end = (int(part) for part in header.removeprefix("bytes=").split("-"))
+        return httpx.Response(206, content=payload[start : end + 1])
+
+    dest = tmp_path / "ranged.bin"
+    async with _client(handler) as client:
+        written = await client.download_to(
+            f"{API}/file", str(dest), size=len(payload)
+        )
+
+    assert written == len(payload)
+    assert dest.read_bytes() == payload
+    assert len(ranges) == 4
+    assert sorted(ranges) == [
+        "bytes=0-1023",
+        "bytes=1024-2047",
+        "bytes=2048-3071",
+        "bytes=3072-4095",
+    ]
+
+
+async def test_range_ignored_falls_back_to_one_stream(tmp_path, monkeypatch):
+    monkeypatch.setattr(pikpak_client, "_MIN_SPLIT", 1024)
+    monkeypatch.setattr(pikpak_client, "_CONNECTIONS", 4)
+    payload = b"y" * 4096
+    ranged: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("range"):
+            ranged.append(request.headers["range"])
+        return httpx.Response(200, content=payload)
+
+    dest = tmp_path / "fallback.bin"
+    async with _client(handler) as client:
+        written = await client.download_to(
+            f"{API}/file", str(dest), size=len(payload)
+        )
+
+    assert ranged, "the ranged attempt must happen before the fallback"
+    assert written == len(payload)
+    assert dest.read_bytes() == payload
+
+
 # ---------------------------------------------------------------------------
 # Link and filename rules
 # ---------------------------------------------------------------------------
@@ -275,7 +329,13 @@ class _FakeClient:
             self.tracker.leave()
 
     async def download_to(
-        self, url: str, dest: str, *, on_bytes=None, is_cancelled=None
+        self,
+        url: str,
+        dest: str,
+        *,
+        size: int = 0,
+        on_bytes=None,
+        is_cancelled=None,
     ) -> int:
         self.tracker.enter()
         try:
@@ -287,6 +347,16 @@ class _FakeClient:
             return len(data)
         finally:
             self.tracker.leave()
+
+
+class _FakeMessage:
+    """Stands in for the chat message; records anything the helper sends."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def reply_rich(self, *args, **kwargs):
+        self.sent.append(str(kwargs))
 
 
 class _FakeListener:
@@ -353,6 +423,20 @@ async def test_stale_result_re_lists_and_retries_once(tmp_path):
     assert failures == []
     assert client.share_calls == [True]
     assert (tmp_path / "V1.bin").read_bytes() == b"data"
+
+
+async def test_downloads_send_no_per_file_chat_messages(tmp_path):
+    files = [
+        PikPakEntry("V1", "one.bin", 4, False),
+        PikPakEntry("V2", "two.bin", 4, False),
+    ]
+    helper = _helper(_FakeClient(_Tracker(), files), files)
+    helper._listener.message = _FakeMessage()
+
+    failures = await helper._download_files(SHARE, files, str(tmp_path))
+
+    assert failures == []
+    assert helper._listener.message.sent == []
 
 
 async def test_second_stale_answer_is_reported_not_looped(tmp_path):
