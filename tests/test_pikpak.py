@@ -14,6 +14,7 @@ from bot.helper.download import pikpak_download
 from bot.helper.net import pikpak_client
 from bot.helper.net.pikpak_client import (
     PikPakClient,
+    PikPakDownload,
     PikPakEntry,
     PikPakError,
     parse_share_link,
@@ -28,6 +29,14 @@ API = "https://api.piyann.my.id"
 def fresh_lock(monkeypatch):
     """One module lock per test loop: production runs one loop, pytest does not."""
     monkeypatch.setattr(pikpak_download, "PIKPAK_DOWNLOAD_LOCK", asyncio.Lock())
+
+
+@pytest.fixture(autouse=True)
+def no_aria2(monkeypatch):
+    """Every helper test exercises the httpx fallback unless it installs a fake."""
+    from bot.core.torrent_manager import TorrentManager
+
+    monkeypatch.setattr(TorrentManager, "aria2", None)
 
 
 def _client(handler) -> PikPakClient:
@@ -123,6 +132,38 @@ async def test_download_reads_filename_from_response_not_listing(monkeypatch):
     assert seen[0].url.params["file_id"] == "Vfile1"
 
 
+async def test_download_retries_one_gateway_timeout(monkeypatch):
+    calls = {"n": 0}
+
+    async def no_sleep(seconds):
+        return None
+
+    monkeypatch.setattr(pikpak_client, "sleep", no_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(504, json={"success": False, "error": ""})
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "download_url": "https://cdn.test/file",
+                "file_id": "Vdrive",
+                "filename": "clip.mp4",
+                "file_size": 10,
+                "expires_at": 0,
+                "error": "",
+            },
+        )
+
+    async with _client(handler) as client:
+        info = await client.download(SHARE, "Vfile1")
+
+    assert calls["n"] == 2
+    assert info.filename == "clip.mp4"
+
+
 async def test_password_error_is_explained_to_the_user(monkeypatch):
     monkeypatch.setattr(Config, "GATEWAY_TOKEN", "")
     body = {
@@ -170,59 +211,6 @@ async def test_download_to_streams_bytes_and_marks_gone_stale(tmp_path):
         with pytest.raises(PikPakError) as caught:
             await client.download_to(f"{API}/missing", str(sink))
         assert caught.value.stale
-
-
-async def test_download_to_ranges_one_result_over_many_connections(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setattr(pikpak_client, "_MIN_SPLIT", 1024)
-    monkeypatch.setattr(pikpak_client, "_CONNECTIONS", 4)
-    payload = bytes(range(256)) * 16  # 4096 bytes
-    ranges: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        header = request.headers.get("range", "")
-        ranges.append(header)
-        start, end = (int(part) for part in header.removeprefix("bytes=").split("-"))
-        return httpx.Response(206, content=payload[start : end + 1])
-
-    dest = tmp_path / "ranged.bin"
-    async with _client(handler) as client:
-        written = await client.download_to(
-            f"{API}/file", str(dest), size=len(payload)
-        )
-
-    assert written == len(payload)
-    assert dest.read_bytes() == payload
-    assert len(ranges) == 4
-    assert sorted(ranges) == [
-        "bytes=0-1023",
-        "bytes=1024-2047",
-        "bytes=2048-3071",
-        "bytes=3072-4095",
-    ]
-
-
-async def test_range_ignored_falls_back_to_one_stream(tmp_path, monkeypatch):
-    monkeypatch.setattr(pikpak_client, "_MIN_SPLIT", 1024)
-    monkeypatch.setattr(pikpak_client, "_CONNECTIONS", 4)
-    payload = b"y" * 4096
-    ranged: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.headers.get("range"):
-            ranged.append(request.headers["range"])
-        return httpx.Response(200, content=payload)
-
-    dest = tmp_path / "fallback.bin"
-    async with _client(handler) as client:
-        written = await client.download_to(
-            f"{API}/file", str(dest), size=len(payload)
-        )
-
-    assert ranged, "the ranged attempt must happen before the fallback"
-    assert written == len(payload)
-    assert dest.read_bytes() == payload
 
 
 # ---------------------------------------------------------------------------
@@ -312,8 +300,6 @@ class _FakeClient:
         return list(self.files)
 
     async def download(self, url: str, file_id: str):
-        from bot.helper.net.pikpak_client import PikPakDownload
-
         self.downloads.append(file_id)
         self.tracker.enter()
         try:
@@ -380,6 +366,57 @@ def _helper(client, files: list[PikPakEntry]) -> pikpak_download.PikPakDownloadH
     helper = pikpak_download.PikPakDownloadHelper(listener, client=client)
     helper._single_file = len(files) == 1
     return helper
+
+
+async def test_aria2_is_preferred_for_a_resolved_cdn_link(tmp_path, monkeypatch):
+    from bot.core.torrent_manager import TorrentManager
+
+    class _FakeAria2:
+        def __init__(self) -> None:
+            self.uris: list[str] = []
+            self.options: dict[str, str] = {}
+
+        async def addUri(self, uris, options, position=0):
+            self.uris = list(uris)
+            self.options = dict(options)
+            Path(options["dir"], options["out"]).write_bytes(b"data")
+            return "gid1"
+
+        async def tellStatus(self, gid):
+            return {
+                "gid": gid,
+                "status": "complete",
+                "completedLength": "4",
+                "totalLength": "4",
+                "errorMessage": "",
+            }
+
+        async def removeDownloadResult(self, gid):
+            return None
+
+        async def forceRemove(self, gid):
+            return None
+
+    aria2 = _FakeAria2()
+    monkeypatch.setattr(TorrentManager, "aria2", aria2)
+    files = [PikPakEntry("V1", "one.bin", 4, False)]
+    client = _FakeClient(_Tracker(), files)
+
+    async def no_stream(*args, **kwargs):
+        raise AssertionError("httpx stream used even though aria2 was available")
+
+    client.download_to = no_stream
+    helper = _helper(client, files)
+
+    failures = await helper._download_files(SHARE, files, str(tmp_path))
+
+    assert failures == []
+    assert aria2.uris == ["https://cdn.test/V1"]
+    assert aria2.options["out"] == "V1.bin"
+    assert aria2.options["split"] == "10"
+    assert aria2.options["max-connection-per-server"] == "10"
+    assert aria2.options["min-split-size"] == "10M"
+    assert (tmp_path / "V1.bin").read_bytes() == b"data"
 
 
 async def test_two_tasks_never_overlap_a_download_call(tmp_path):
