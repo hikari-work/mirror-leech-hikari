@@ -61,21 +61,24 @@ def _parse_sub_args(args):
 def _sub_report(title, feed_link, entries, feed_title, last, cmd, inf, exf, stv):
     last_title, last_link, size = last
     msg = "<b>Subscribed!</b>"
-    msg += f"\n<b>Title: </b><code>{title}</code>\n<b>Feed Url: </b>{feed_link}"
+    msg += f"\n<b>Title:</b> <code>{title}</code>\n<b>Feed Url:</b> {feed_link}"
     if entries:
-        msg += f"\n<b>latest record for </b>{feed_title}:"
+        msg += f"\n<b>Latest record:</b> {feed_title}"
         clean = last_title.replace(">", "").replace("<", "")
-        msg += f"\nName: <code>{clean}</code>"
-        msg += f"\n<b>Link: </b><code>{last_link}</code>"
+        msg += f"\n<b>Name:</b> <code>{clean}</code>"
+        msg += f"\n<b>Link:</b> <code>{last_link}</code>"
         if size:
-            msg += f"\nSize: {get_readable_file_size(size)}"
+            msg += f"\n<b>Size:</b> {get_readable_file_size(size)}"
     else:
         msg += (
             "\n<b>Note:</b> Feed is currently empty, will be monitored for new items."
         )
-    msg += f"\n<b>Command: </b><code>{cmd}</code>"
-    msg += f"\n<b>Filters:-</b>\ninf: <code>{inf}</code>\nexf: <code>{exf}</code>"
-    msg += f"\n<b>sensitive: </b>{stv}"
+    msg += f"\n<b>Command:</b> <code>{cmd}</code>"
+    msg += (
+        f"\n<b>Filters:</b>\n<b>Inf:</b> <code>{inf}</code>"
+        f"\n<b>Exf:</b> <code>{exf}</code>"
+    )
+    msg += f"\n<b>Sensitive:</b> {stv}"
     return msg
 
 

@@ -281,7 +281,7 @@ async def test_shortlink_onto_thread_continues_into_page_prompt(bypass_cmd):
     stubs.bypass_scrape.assert_awaited_once_with(
         "https://semprot.com/threads/foo.1/", "1", ""
     )
-    assert any("Total pages: 3" in body for body in _shown(stubs.edit_message))
+    assert any("<b>Total pages:</b> 3" in body for body in _shown(stubs.edit_message))
 
 
 async def test_shortlink_failure_is_reported(bypass_cmd):

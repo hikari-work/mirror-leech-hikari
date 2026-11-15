@@ -248,9 +248,9 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         else:
             tstatus = _task_status(task)
         if task.listener.is_super_chat:
-            msg += f"<b>{index + start_position}.<a href='{task.listener.message.link}'>{tstatus}</a>: </b>"
+            msg += f"<b>{index + start_position}.<a href='{task.listener.message.link}'>{tstatus}</a>:</b> "
         else:
-            msg += f"<b>{index + start_position}.{tstatus}: </b>"
+            msg += f"<b>{index + start_position}.{tstatus}:</b> "
         msg += f"<code>{escape(f'{task.name()}')}</code>"
         if task.listener.subname:
             msg += f"\n<i>{task.listener.subname}</i>"
@@ -283,15 +283,15 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 except Exception:
                     pass
         elif tstatus == MirrorStatus.STATUS_SEED:
-            msg += f"\n<b>Size: </b>{task.size()}"
-            msg += f"\n<b>Speed: </b>{task.seed_speed()}"
-            msg += f"\n<b>Uploaded: </b>{task.uploaded_bytes()}"
-            msg += f"\n<b>Ratio: </b>{task.ratio()}"
-            msg += f" | <b>Time: </b>{task.seeding_time()}"
+            msg += f"\n<b>Size:</b> {task.size()}"
+            msg += f"\n<b>Speed:</b> {task.seed_speed()}"
+            msg += f"\n<b>Uploaded:</b> {task.uploaded_bytes()}"
+            msg += f"\n<b>Ratio:</b> {task.ratio()}"
+            msg += f" | <b>Time:</b> {task.seeding_time()}"
         else:
-            msg += f"\n<b>Size: </b>{task.size()}"
+            msg += f"\n<b>Size:</b> {task.size()}"
         gid = task.gid()
-        msg += f"\n<b>Gid: </b><code>{gid}</code>"
+        msg += f"\n<b>Gid:</b> <code>{gid}</code>"
         msg += (
             f" | <tg-button type='callback_data' data='cancel canconf {gid}'"
             f" style='danger'>Cancel</tg-button>"

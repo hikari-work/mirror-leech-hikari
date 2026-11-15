@@ -139,8 +139,8 @@ async def _items_text(link, count) -> str:
     for item_num in range(count):
         entry = rss_d.entries[item_num]
         clean = (feed.item_title(entry) or "").replace(">", "").replace("<", "")
-        item_info += f"<b>Name: </b><code>{clean}</code>\n"
-        item_info += f"<b>Link: </b><code>{feed.item_url(entry)}</code>\n\n"
+        item_info += f"<b>Name:</b> <code>{clean}</code>\n"
+        item_info += f"<b>Link:</b> <code>{feed.item_url(entry)}</code>\n\n"
     return item_info
 
 

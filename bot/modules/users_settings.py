@@ -207,7 +207,7 @@ async def add_copy_dests(_, message, name):
         return
     fresh, error = additions_to(presets[name], found)
     if error:
-        await send_message(message, f"<b>{name}</b>: {error}")
+        await send_message(message, f"<b>{name}:</b> {error}")
         return
     presets[name].extend(fresh)
     await delete_message(message)
@@ -644,14 +644,15 @@ def _dump_value(k, v):
 async def get_users_settings(_, message):
     msg = ""
     if auth_chats:
-        msg += f"AUTHORIZED_CHATS: {auth_chats}\n"
+        msg += f"<b>AUTHORIZED_CHATS:</b> {auth_chats}\n"
     if sudo_users:
-        msg += f"SUDO_USERS: {sudo_users}\n\n"
+        msg += f"<b>SUDO_USERS:</b> {sudo_users}\n\n"
     if user_data:
         for u, d in user_data.items():
             kmsg = f"\n<b>{u}:</b>\n"
             if vmsg := "".join(
-                f"{k}: <code>{_dump_value(k, v)}</code>\n" for k, v in d.items()
+                f"<b>{k}:</b> <code>{_dump_value(k, v)}</code>\n"
+                for k, v in d.items()
             ):
                 msg += kmsg + vmsg
         if not msg:

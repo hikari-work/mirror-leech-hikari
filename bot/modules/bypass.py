@@ -109,9 +109,12 @@ async def _deliver_links(message, status, title, all_links, page_list, keyword):
     async with aiopen(path, "w") as f:
         await f.write("\n".join(all_links))
 
-    caption = f"<b>{title}</b>\nPages: {page_list} | Links: {len(all_links)}"
+    caption = (
+        f"<b>{title}</b>\n<b>Pages:</b> {page_list}"
+        f" | <b>Links:</b> {len(all_links)}"
+    )
     if keyword:
-        caption += f" | Filter: <code>{keyword}</code>"
+        caption += f" | <b>Filter:</b> <code>{keyword}</code>"
     await send_file(message, path, caption=caption)
     await delete_message(status)
     if await aiopath.exists(path):
@@ -156,7 +159,7 @@ async def bypass_scrape_cmd(client, message):
     await edit_message(
         status,
         f"<b>{title}</b>\n"
-        f"Total pages: {total_pages}\n\n"
+        f"<b>Total pages:</b> {total_pages}\n\n"
         "Kirim halaman yang ingin di-scrape:\n"
         "<code>0</code> = semua, <code>1-10</code> = range, "
         "<code>1,5,7</code> = pilihan",

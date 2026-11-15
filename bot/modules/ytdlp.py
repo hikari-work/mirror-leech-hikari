@@ -195,7 +195,11 @@ class YtSelection:
         buttons.data_button("Back", "ytq back", "footer")
         buttons.data_button("Cancel", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(2)
-        msg = f"Choose Bit rate for <b>{b_name}</b>:\nTimeout: {get_readable_time(self._timeout - (time() - self._time))}"
+        msg = (
+            f"Choose Bit rate for <b>{b_name}</b>:\n"
+            f"<b>Timeout:</b> "
+            f"{get_readable_time(self._timeout - (time() - self._time))}"
+        )
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def mp3_subbuttons(self):
