@@ -33,7 +33,7 @@ from ..telegram.message_utils import (
     chat_of,
     delete_message,
     delete_status,
-    file_link_line,
+    rich_file_chunks,
     send_message,
     update_status_message,
 )
@@ -554,18 +554,10 @@ class TaskListener(TaskConfig):
             for notice in self.stream_notices:
                 msg += f"\n{notice}"
             msg += f"\n<b>cc: </b>{self.tag}\n\n"
-            if not files:
-                await send_message(self.message, msg)
-            else:
-                fmsg = ""
-                for index, (link, name) in enumerate(files.items(), start=1):
-                    fmsg += file_link_line(index, link, name)
-                    if len(fmsg.encode() + msg.encode()) > 4000:
-                        await send_message(self.message, msg + fmsg)
-                        await sleep(1)
-                        fmsg = ""
-                if fmsg != "":
-                    await send_message(self.message, msg + fmsg)
+            for index, chunk in enumerate(rich_file_chunks(msg, files)):
+                if index:
+                    await sleep(1)
+                await send_message(self.message, chunk)
 
         # The completion message is out, which is what a resumed task would have
         # been resuming for. Dropped here rather than at the top of the method
