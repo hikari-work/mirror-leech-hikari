@@ -41,7 +41,7 @@ class Config:
     WARP_ENABLED = True
     WARP_PROXY_PORT = 40000
     # Gateway configuration for scrapers and resolvers
-    GATEWAY_URL = "https://api.piyann.me"
+    GATEWAY_URL = "https://api.piyann.my.id"
     GATEWAY_TOKEN = ""
     # Terabox ndus session cookie value, without the "ndus=" prefix. Passed to
     # the gateway as the ``ndus`` query param so dlinks are minted against this

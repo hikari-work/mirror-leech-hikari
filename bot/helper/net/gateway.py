@@ -1,7 +1,7 @@
 """One place that knows the gateway.
 
 Half a dozen scrapers, the shortlink bypassers, the proxy pool and the Mega
-client all read api.piyann.me, and each of them used to spell out the same two
+client all read api.piyann.my.id, and each of them used to spell out the same two
 things: the base URL, with its config fallback and its trailing slash trimmed,
 and the bearer token when one is set. Ten copies is ten places to edit when the
 gateway moves, and they had already drifted on whether to ask for JSON at all.
@@ -9,7 +9,7 @@ gateway moves, and they had already drifted on whether to ask for JSON at all.
 
 from ...core.config_manager import Config
 
-GATEWAY_FALLBACK = "https://api.piyann.me"
+GATEWAY_FALLBACK = "https://api.piyann.my.id"
 
 
 def gateway_url(path=""):
