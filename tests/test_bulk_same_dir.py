@@ -21,6 +21,7 @@ import pytest
 
 import bot.helper.listeners.task_listener as tl
 import bot.helper.task.batch_tracker as bt
+import bot.helper.telegram.message_utils as mu
 from bot.helper.task.multi_link import MultiLinkMixin
 from bot.helper.upload.stream_uploader import StreamUploader
 from bot.helper.util.task_args import (
@@ -422,7 +423,11 @@ class TestBatchAccounting:
         assert "Complete" in text
         assert notify is True, "the user has to be told the batch finished"
 
-    async def test_only_the_first_summary_chunk_notifies(self, batch):
+    async def test_only_the_first_summary_chunk_notifies(self, batch, monkeypatch):
+        # A real rich message holds 32768 characters; shrink the budget so a
+        # 120-file summary still has to spill while the test stays quick.
+        monkeypatch.setattr(mu, "RICH_TEXT_LIMIT", 600)
+
         await report(batch, 120)
 
         assert len(batch.notices) > 1, "the file list has to spill over"

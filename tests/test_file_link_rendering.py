@@ -21,7 +21,7 @@ import pytest
 
 import bot.helper.listeners.task_listener as tl
 import bot.helper.task.batch_tracker as bt
-from bot.helper.telegram.message_utils import file_link_line
+from bot.helper.telegram.message_utils import file_link_line, rich_file_chunks
 
 # ── the helper ──────────────────────────────────────────────────────
 
@@ -130,6 +130,27 @@ async def test_a_plain_telegram_result_is_unchanged(task):
     assert "<a href='https://t.me/c/1/2'>a.mkv</a>" in body
 
 
+async def test_a_short_list_is_one_message(task):
+    files = {
+        f"https://t.me/c/{i}": f"FRISCA ({i}).jpg" for i in range(1, 47)
+    }
+    await task.on_upload_complete("https://t.me/c/1", files, 46, 0)
+
+    assert len(task.sent) == 1
+    body = task.sent[0]
+    assert "<blockquote" not in body
+    assert "46. <a href='https://t.me/c/46'>FRISCA (46).jpg</a>" in body
+
+
+def test_a_huge_list_splits_before_the_rich_limit():
+    files = {f"https://t.me/c/{i}": f"name{i}.mkv" for i in range(5000)}
+    chunks = rich_file_chunks("<b>Total Files:</b> 5000\n\n", files)
+
+    assert len(chunks) > 1, "a 5000-file list cannot travel in one message"
+    assert all(len(chunk.encode()) <= 32768 for chunk in chunks)
+    assert "5000. <a href='https://t.me/c/4999'>name4999.mkv</a>" in chunks[-1]
+
+
 @pytest.mark.parametrize(
     "renderer",
     [
@@ -140,5 +161,5 @@ async def test_a_plain_telegram_result_is_unchanged(task):
 def test_both_renderers_go_through_the_escaping_helper(renderer):
     source = inspect.getsource(renderer)
 
-    assert "file_link_line(" in source
+    assert "rich_file_chunks(" in source
     assert "href='{link}'" not in source

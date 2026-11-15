@@ -6,7 +6,7 @@ from ... import multi_batches, multi_tags
 from ..telegram.message_utils import (
     delete_message,
     edit_message,
-    file_link_line,
+    rich_file_chunks,
     send_message,
     send_notice,
 )
@@ -206,22 +206,10 @@ class BatchTrackerMixin(TaskConfigHost):
         and a hundred-file summary split across several messages should not
         ring the user's phone once per message. The rest follow silently.
         """
-        notify = True
-        if not all_files:
-            await send_notice(anchor, head, notify=notify)
-            return
-        msg = head
-        fmsg = ""
-        for index, (flink, fname) in enumerate(all_files.items(), start=1):
-            fmsg += file_link_line(index, flink, fname)
-            if len(fmsg.encode()) + len(msg.encode()) > 4000:
-                await send_notice(anchor, msg + fmsg, notify=notify)
-                notify = False
+        for index, chunk in enumerate(rich_file_chunks(head, all_files)):
+            if index:
                 await sleep(1)
-                fmsg = ""
-                msg = ""
-        if fmsg:
-            await send_notice(anchor, msg + fmsg, notify=notify)
+            await send_notice(anchor, chunk, notify=index == 0)
 
     async def _release(self, batch) -> None:
         """Drop the batch bookkeeping and the command messages it owns."""

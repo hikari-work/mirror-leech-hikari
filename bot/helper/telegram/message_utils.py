@@ -84,6 +84,43 @@ def file_link_line(index: int, link: str, name: str) -> str:
     return f"{index}. <a href='{escaped_link}'>{html.escape(name)}</a>\n"
 
 
+RICH_TEXT_LIMIT = 32768
+"""Characters a rich message may carry.
+
+Telegram's ceiling for a rich message is 32768 UTF-16 code units. Budgeting in
+UTF-8 bytes overcounts -- a character is never fewer bytes than code units --
+so a chunk that fits this budget is never refused for being too long.
+"""
+
+def rich_file_chunks(head: str, files: dict[str, str]) -> list[str]:
+    """Split *head* followed by the numbered file list into rich message texts.
+
+    A rich message holds 32768 characters where a plain one held 4096, so a
+    summary that used to take a dozen messages now usually takes one. The list
+    is left unquoted: a quote block collapses to a single line in the chat
+    preview, which hides the counters the summary exists to show.
+    """
+    chunks: list[str] = []
+    msg = head
+    listed = ""
+    budget = len(head.encode())
+    for index, (link, name) in enumerate(files.items(), start=1):
+        line = file_link_line(index, link, name)
+        line_size = len(line.encode())
+        if listed and budget + line_size > RICH_TEXT_LIMIT:
+            chunks.append(msg + listed)
+            msg = ""
+            listed = ""
+            budget = 0
+        listed += line
+        budget += line_size
+    if listed:
+        chunks.append(msg + listed)
+    elif not chunks:
+        chunks.append(head)
+    return chunks
+
+
 def rich_html(text: str) -> str:
     """Return *text* as the HTML body of a rich message.
 
