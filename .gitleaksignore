@@ -33,3 +33,17 @@
 # meredam salinan di tip (fingerprint-nya bergeser tiap penyuntingan), commit
 # lampau tidak bisa berubah — jadi entri ini stabil selamanya.
 e575406d1d5b345ed0dcac08bc488f9650b3abb7:.gitleaksignore:generic-api-key:6
+#
+# Dua temuan berikut adalah api_hash palsu di fixture `tests/test_telegram_clients.py`
+# (commit 2839816e, "feat: give user logins their own api_id/api_hash pair"):
+# 32 karakter heksadesimal berulang yang dipakai sebagai nilai pembanding di
+# test, bukan kredensial. Api hash asli selalu pasangan dengan api_id milik
+# akun telegram, dan fixture ini tidak pernah mendaftarkan apa pun.
+#
+# Diverifikasi dengan:
+#   git show 2839816e:tests/test_telegram_clients.py | grep -n 'api_hash =='
+#
+# Literalnya sengaja tidak ditulis di sini, dan commit-nya sudah ter-push jadi
+# meredam salinannya di tip pun tidak menghapus jejaknya di history.
+2839816e781fc045570e6e641bbff0539ffb33f4:tests/test_telegram_clients.py:generic-api-key:141
+2839816e781fc045570e6e641bbff0539ffb33f4:tests/test_telegram_clients.py:generic-api-key:167

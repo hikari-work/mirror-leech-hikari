@@ -1,6 +1,7 @@
 from importlib import import_module
 from ast import literal_eval
 from os import getenv
+from typing import Any
 
 from bot import LOGGER
 
@@ -137,7 +138,7 @@ class Config:
     # created with before these existed.
     USER_TELEGRAM_API = 0
     USER_TELEGRAM_HASH = ""
-    TG_PROXY = {}
+    TG_PROXY: Any = {}
     THUMBNAIL_LAYOUT = ""
     TORRENT_TIMEOUT = 0
     # Where a finished download goes: "tg" (telegram messages, the behaviour this

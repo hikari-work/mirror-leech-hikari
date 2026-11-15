@@ -21,7 +21,7 @@ from .flood import flood_seconds
 if TYPE_CHECKING:
     # For ``chat_of``'s signature only; nothing here builds either one.
     from pyrogram import Client
-    from pyrogram.types import Chat, Message
+    from pyrogram.types import CallbackQuery, Chat, Message
 
 STATUS_RESEND_INTERVAL = 8
 """Seconds before the status message may be re-sent to the bottom of the chat.
@@ -41,6 +41,17 @@ def chat_of(message: Message) -> Chat:
     about that, so the assumption is stated here.
     """
     return message.chat  # pyrefly: ignore[bad-return]
+
+
+def query_message(query: CallbackQuery) -> Message:
+    """The message a button was pressed on.
+
+    ``CallbackQuery.message`` is optional because a callback can hang off an
+    inline message, which this bot never sends: every keyboard it builds sits
+    on a message of its own. Stated once here, the press handlers below do not
+    each have to argue about it.
+    """
+    return query.message  # pyrefly: ignore[bad-return]
 
 
 def message_media(message: Message):
@@ -247,12 +258,18 @@ async def send_notice(
         LOGGER.error("Cannot send a notice: the message has no chat")
         return "No chat to send to"
     try:
-        return await TgClient.bot.send_rich_message(
+        sent = await TgClient.bot.send_rich_message(
             chat_id=chat_id,
             rich_message=rich_input(text),
             message_thread_id=getattr(message, "message_thread_id", None),
             disable_notification=not notify,
         )
+        if sent is None:
+            # pyrogram types a send as optional: None is the send that went
+            # through without a message object to report. Still an error string
+            # to the caller, which is the other half of this return shape.
+            return "Telegram returned no message for the notice"
+        return sent
     except (FloodWait, FloodPremiumWait) as f:
         LOGGER.warning(str(f))
         await sleep(flood_seconds(f) * 1.2)

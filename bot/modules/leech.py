@@ -174,7 +174,9 @@ class Leech(CommandTask):
                 document.mime_type == "application/x-bittorrent"
                 or (document.file_name or "").endswith(".torrent")
             ):
-                self.link = await reply_to.download()
+                # pyrogram types a download as any of the streams it can hand
+                # back; a replied document downloads to its path on disk.
+                self.link = await reply_to.download()  # pyrefly: ignore[bad-assignment]
                 file_ = None
 
         return reply_to, file_, session

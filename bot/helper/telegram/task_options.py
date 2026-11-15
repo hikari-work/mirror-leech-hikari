@@ -37,6 +37,7 @@ from .message_utils import (
     chat_of,
     delete_message,
     edit_message,
+    query_message,
     send_message,
 )
 
@@ -475,7 +476,7 @@ async def task_options_callback(client: Client, query: CallbackQuery) -> None:
         # the copy destinations, and the way back from them
         prompt.view = PRESET_VIEW if action == "c" else MAIN_VIEW
         await query.answer()
-        await _redraw(query.message, prompt)
+        await _redraw(query_message(query), prompt)
         return
     await _press_option(client, query, prompt, action)
 
@@ -503,15 +504,17 @@ async def _press_option(
         await query.answer()
         return
     await query.answer()
-    await _redraw(query.message, prompt)
+    await _redraw(query_message(query), prompt)
 
 
 def _prompt_of(query: CallbackQuery) -> Prompt | None:
-    return pending.get((chat_of(query.message).id, query.message.id))
+    message = query_message(query)
+    return pending.get((chat_of(message).id, message.id))
 
 
 def _forget(query: CallbackQuery) -> None:
-    pending.pop((chat_of(query.message).id, query.message.id), None)
+    message = query_message(query)
+    pending.pop((chat_of(message).id, message.id), None)
 
 
 async def _close(query: CallbackQuery, prompt: Prompt, run: bool) -> None:
@@ -576,7 +579,7 @@ async def _ask_value(
         # ask, and the read already running takes what the user sends.
         return
     prompt.reading = get_running_loop().create_task(
-        _catch_value(client, query.message, prompt, flag)
+        _catch_value(client, query_message(query), prompt, flag)
     )
     # One turn of the loop, so the read has registered its message handler before
     # this callback returns and the answer can arrive.

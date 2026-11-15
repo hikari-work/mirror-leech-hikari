@@ -188,6 +188,8 @@ async def resolve_source(listener, chat_spec, count):
 
     try:
         chat = await TgClient.bot.get_chat(chat_spec)
+        if chat is None:
+            raise ValueError("Telegram does not know that chat")
         messages = await _history(TgClient.bot, chat.id, count)
         return chat.id, chat.username, True, messages
     except Exception as e:
@@ -206,6 +208,8 @@ async def resolve_source(listener, chat_spec, count):
         )
     try:
         chat = await client.get_chat(chat_spec)
+        if chat is None:
+            raise ValueError("Telegram does not know that chat")
         return chat.id, chat.username, False, await _history(client, chat.id, count)
     except Exception as e:
         raise SourceError(f"Could not read <b>{escape(chat_spec)}</b>: {e}") from e
