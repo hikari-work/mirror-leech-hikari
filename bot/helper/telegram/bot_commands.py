@@ -35,4 +35,3 @@ class BotCommands:
     LoginCommand = f"login{i}"
     LogoutCommand = f"logout{i}"
     CopyCommand = f"copy{i}"
-    LiveCommand = f"live{i}"
