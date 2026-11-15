@@ -32,6 +32,7 @@ from ..helper.telegram.message_utils import (
     auto_delete_message,
     chat_of,
     edit_message,
+    query_message,
     send_message,
 )
 from ..helper.upload.flood_pacer import FloodPacer
@@ -178,14 +179,15 @@ def _bad_token(token: str) -> str:
 @new_task
 async def copy_choice(client: Any, query: CallbackQuery) -> None:
     """Do what the pressed button says, or explain why it can no longer."""
-    data = query.data.split()
+    data = (query.data or "").split()
     if query.from_user.id != int(data[1]):
         await query.answer("Not yours!", show_alert=True)
         return
     # Same as in copy_task: a button the bot is handling belongs to a
     # message from a real chat.
-    chat_id: int = chat_of(query.message).id  # pyrefly: ignore[bad-assignment]
-    key = (chat_id, query.message.id)
+    message = query_message(query)
+    chat_id: int = chat_of(message).id  # pyrefly: ignore[bad-assignment]
+    key = (chat_id, message.id)
     if data[2] == "x":
         await query.answer()
         pending.pop(key, None)
@@ -232,7 +234,7 @@ async def copy_choice(client: Any, query: CallbackQuery) -> None:
         )
         await auto_delete_message(query.message)
         return
-    await _run_copy(query.message, entry["record"], name, targets, user_id)
+    await _run_copy(message, entry["record"], name, targets, user_id)
 
 
 async def _run_copy(

@@ -108,6 +108,7 @@ def copy_mod(monkeypatch):
     message_utils.edit_message = stubs.edit_message
     message_utils.auto_delete_message = stubs.auto_delete
     message_utils.chat_of = lambda message: message.chat
+    message_utils.query_message = lambda query: query.message
 
     flood_mod = ModuleType("bot.helper.upload.flood_pacer")
     flood_mod.FloodPacer = _Pacer

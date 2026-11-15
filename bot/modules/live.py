@@ -97,7 +97,7 @@ async def live_menu(_client: Client, message: Message) -> None:
 
 @new_task
 async def live_callback(client: Client, query: CallbackQuery) -> None:
-    raw = query.data
+    raw = query.data or ""
     if isinstance(raw, bytes):
         raw = raw.decode()
     data = raw.split()

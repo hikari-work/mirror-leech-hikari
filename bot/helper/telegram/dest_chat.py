@@ -258,8 +258,17 @@ def is_group_chat(chat: Chat) -> bool:
 
 
 def can_manage_and_delete(member: ChatMember) -> bool:
-    """Whether an account can both manage the chat and delete messages in it."""
-    return member.privileges.can_manage_chat and member.privileges.can_delete_messages
+    """Whether an account can both manage the chat and delete messages in it.
+
+    ``privileges`` is None for a member who is not an administrator at all, so
+    it is the answer to this question rather than a detail to read through.
+    """
+    privileges = member.privileges
+    return bool(
+        privileges
+        and privileges.can_manage_chat
+        and privileges.can_delete_messages
+    )
 
 
 async def verify_copy_target(entry: str, chat_id: int | str) -> None:

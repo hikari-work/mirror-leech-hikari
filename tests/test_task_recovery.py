@@ -166,7 +166,7 @@ async def test_an_unreadable_row_is_reported_rather_than_raised(store, caplog) -
 @pytest.mark.parametrize(
     ("row", "expected"),
     [
-        (_row(state="up"), "up stage"),
+        (_row(state="up"), "upload directory is gone"),
         (_row(multi=3), "batch"),
         (_row(multi_tag="abc"), "batch"),
         (_row(mid=10**9 + 1), "batch"),
@@ -195,7 +195,7 @@ async def test_a_chat_gets_one_status_message_however_many_tasks_returned(
     message = SimpleNamespace(id=1, chat=SimpleNamespace(id=-100))
 
     async def _rebuild(row):
-        return SimpleNamespace(mid=row["mid"], message=message)
+        return SimpleNamespace(mid=row["mid"], message=message, up_dir="")
 
     monkeypatch.setattr(task_recovery, "_rebuild", _rebuild)
 
@@ -214,7 +214,7 @@ async def test_two_chats_are_announced_to_separately(
 
     async def _rebuild(row):
         message = SimpleNamespace(id=1, chat=SimpleNamespace(id=row["cid"]))
-        return SimpleNamespace(mid=row["mid"], message=message)
+        return SimpleNamespace(mid=row["mid"], message=message, up_dir="")
 
     monkeypatch.setattr(task_recovery, "_rebuild", _rebuild)
 
@@ -250,7 +250,7 @@ async def test_a_directory_no_task_claimed_is_removed(sweep_dir) -> None:
     (sweep_dir / "123").mkdir()
     (sweep_dir / "456").mkdir()
 
-    await task_recovery._sweep_download_dir({456})
+    await task_recovery._sweep_download_dir({456}, frozenset())
 
     assert [p.name for p in sweep_dir.iterdir()] == ["456"]
 
@@ -260,15 +260,31 @@ async def test_a_name_that_is_not_a_task_id_is_left_alone(sweep_dir) -> None:
 
     A sweep that took everything under the download directory -- which is what
     ``clean_all`` did on every boot -- deleted every generated thumbnail with
-    it, for a task that had nothing to do with them.
+    it, for a task that had nothing to do with them. An ``sd*`` staging
+    directory no resumed task claims is a task that is not coming back, so it
+    goes.
     """
     (sweep_dir / "thumbnails").mkdir()
     (sweep_dir / "sd99").mkdir()
     (sweep_dir / "123").mkdir()
 
-    await task_recovery._sweep_download_dir(set())
+    await task_recovery._sweep_download_dir(set(), frozenset())
 
-    assert sorted(p.name for p in sweep_dir.iterdir()) == ["sd99", "thumbnails"]
+    assert sorted(p.name for p in sweep_dir.iterdir()) == ["thumbnails"]
+
+
+async def test_a_staging_directory_a_resumed_upload_owns_survives(
+    sweep_dir,
+) -> None:
+    """A same-dir batch uploads out of ``sd*``, and the row that comes back
+    names that directory: what it has not sent yet is still in there.
+    """
+    (sweep_dir / "sd99").mkdir()
+    (sweep_dir / "sd98").mkdir()
+
+    await task_recovery._sweep_download_dir(set(), {"sd99"})
+
+    assert [p.name for p in sweep_dir.iterdir()] == ["sd99"]
 
 
 class _FakeTorrents:
