@@ -12,7 +12,6 @@ from . import hosts  # noqa: F401
 from ._common import (
     DirectDownloadLinkException,
     bypass_shortener,
-    is_url_shortener,
     user_agent,
 )
 from .hosts.bunkr import (
@@ -105,19 +104,20 @@ def direct_link_generator(link):
     if not domain:
         raise DirectDownloadLinkException("ERROR: Invalid URL")
 
-    if is_url_shortener(domain):
-        resolved = bypass_shortener(link)
-        try:
-            return direct_link_generator(resolved)
-        except DirectDownloadLinkException as e:
-            if str(e).startswith("ERROR: No Direct link function found"):
-                return resolved
-            raise
-
     if handler := resolve(domain, link):
         return handler(link)
 
-    raise DirectDownloadLinkException(f"No Direct link function found for {link}")
+    # No handler for this host: the gateway alone decides whether the link is a
+    # shortlink it can resolve, and answers None for anything else.
+    if (resolved := bypass_shortener(link)) is None:
+        raise DirectDownloadLinkException(f"No Direct link function found for {link}")
+
+    try:
+        return direct_link_generator(resolved)
+    except DirectDownloadLinkException as e:
+        if str(e).startswith("ERROR: No Direct link function found"):
+            return resolved
+        raise
 
 
 __all__ = [

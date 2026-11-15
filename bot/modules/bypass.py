@@ -1,6 +1,5 @@
 from html import escape
 from re import sub as re_sub
-from urllib.parse import urlparse
 
 from aiofiles import open as aiopen
 from aiofiles.os import remove, path as aiopath
@@ -11,10 +10,7 @@ from ..helper.download.bypass_dispatcher import (
     bypass_scrape,
     is_scrape_target,
 )
-from ..helper.download.url_shortener_bypass import (
-    bypass_shortener,
-    is_url_shortener,
-)
+from ..helper.download.url_shortener_bypass import bypass_shortener
 from ..helper.telegram.conversation import wait_for_reply
 from ..helper.telegram.message_utils import (
     delete_message,
@@ -60,19 +56,21 @@ async def _ask_reply(client, message, user_id):
 
 
 async def _resolve_shortlink(status, link):
-    """Walk nested shortlinks until the chain stops being one.
+    """Walk nested shortlinks until the gateway stops recognising them.
 
     A chain such as linkvertise -> ouo -> linkvertise -> mega is followed to the
-    end. When a later hop fails, the last URL the gateway did resolve is
-    answered instead of the error, so a partially walked chain still gives the
-    user something. A cycle or an over-long chain stops the same way.
+    end. The bot keeps no list of shortlink domains: the gateway's unified
+    endpoint answers None for a link it has no resolver for, and that is the end
+    of the chain. When a later hop fails, the last URL the gateway did resolve
+    is answered instead of the error, so a partially walked chain still gives
+    the user something. A cycle or an over-long chain stops the same way.
 
     Returns (link, done). ``done`` means the user has already been answered and
     there is nothing left to scrape: either the chain ended at a plain URL, or
     it failed on the first hop. ``done`` is False only when the chain ended at a
     thread the caller must keep working with.
     """
-    if not is_url_shortener(urlparse(link).hostname or ""):
+    if is_scrape_target(link):
         return link, False
 
     current = link
@@ -88,11 +86,15 @@ async def _resolve_shortlink(status, link):
             await edit_message(status, _bypassed_text(current))
             return current, True
 
+        if target is None:
+            # The gateway knows no resolver for this link, so the chain ends
+            # here: with the URL before it, or with the input itself.
+            if current == link:
+                return link, False
+            await edit_message(status, _bypassed_text(current))
+            return current, True
         if is_scrape_target(target):
             return target, False
-        if not is_url_shortener(urlparse(target).hostname or ""):
-            await edit_message(status, _bypassed_text(target))
-            return target, True
         if target in seen or len(seen) >= _MAX_BYPASS_HOPS:
             await edit_message(status, _bypassed_text(target))
             return target, True

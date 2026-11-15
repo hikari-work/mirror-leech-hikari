@@ -85,8 +85,7 @@ def mega_module(monkeypatch):
     shortener_mod = ModuleType(
         "bot.helper.download.url_shortener_bypass"
     )
-    shortener_mod.bypass_shortener = lambda url: url
-    shortener_mod.is_url_shortener = lambda domain: False
+    shortener_mod.bypass_shortener = lambda url: None
 
     for name, mod in {
         "bot": bot_pkg,
