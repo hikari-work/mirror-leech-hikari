@@ -546,14 +546,14 @@ class TaskListener(TaskConfig):
                 }
             )
         else:
-            msg = f"<b>Name: </b><code>{escape(self.name)}</code>\n\n<b>Size: </b>{get_readable_file_size(self.size)}"
-            msg += f"\n<b>Total Files: </b>{folders}"
+            msg = f"<b>Name:</b> <code>{escape(self.name)}</code>\n\n<b>Size:</b> {get_readable_file_size(self.size)}"
+            msg += f"\n<b>Total Files:</b> {folders}"
             if mime_type != 0:
-                msg += f"\n<b>Corrupted Files: </b>{mime_type}"
-            msg += f"\n<b>Task ID: </b><code>{self.mid}</code>"
+                msg += f"\n<b>Corrupted Files:</b> {mime_type}"
+            msg += f"\n<b>Task ID:</b> <code>{self.mid}</code>"
             for notice in self.stream_notices:
                 msg += f"\n{notice}"
-            msg += f"\n<b>cc: </b>{self.tag}\n\n"
+            msg += f"\n<b>cc:</b> {self.tag}\n\n"
             for index, chunk in enumerate(rich_file_chunks(msg, files)):
                 if index:
                     await sleep(1)

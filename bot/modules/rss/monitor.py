@@ -86,11 +86,11 @@ def resume_or_start(allowed: bool = True) -> bool:
 
 def _feed_message(item: _Item, tag, user) -> str:
     clean = item.title.replace(">", "").replace("<", "")
-    msg = f"<b>Name: </b><code>{clean}</code>"
-    msg += f"\n\n<b>Link: </b><code>{item.url}</code>"
+    msg = f"<b>Name:</b> <code>{clean}</code>"
+    msg += f"\n\n<b>Link:</b> <code>{item.url}</code>"
     if item.size:
-        msg += f"\n<b>Size: </b>{get_readable_file_size(item.size)}"
-    msg += f"\n<b>Tag: </b><code>{tag}</code> <code>{user}</code>"
+        msg += f"\n<b>Size:</b> {get_readable_file_size(item.size)}"
+    msg += f"\n<b>Tag:</b> <code>{tag}</code> <code>{user}</code>"
     return msg
 
 

@@ -117,7 +117,7 @@ def _feed_body(data) -> str:
 
 
 def _all_users_listing(start: int) -> tuple[str, int]:
-    list_feed = f"<b>All subscriptions | Page: {int(start / 5)} </b>"
+    list_feed = f"<b>All subscriptions</b> | <b>Page:</b> {int(start / 5)}"
     keys_count = sum(len(v.keys()) for v in rss_dict.values())
     # Up to five per user, taken from each user's own slice — this pages every
     # user in lockstep rather than paging one flat list. Pre-existing.
@@ -133,11 +133,11 @@ def _all_users_listing(start: int) -> tuple[str, int]:
 
 
 def _own_listing(user_id, start: int) -> tuple[str, int]:
-    list_feed = f"<b>Your subscriptions | Page: {int(start / 5)} </b>"
+    list_feed = f"<b>Your subscriptions</b> | <b>Page:</b> {int(start / 5)}"
     keys_count = len(rss_dict.get(user_id, {}).keys())
     for title, data in list(rss_dict[user_id].items())[start : 5 + start]:
         list_feed += f"\n\n<b>Title:</b> <code>{title}</code>\n"
-        list_feed += f"<b>Feed Url: </b><code>{data['link']}</code>\n"
+        list_feed += f"<b>Feed Url:</b> <code>{data['link']}</code>\n"
         list_feed += _feed_body(data)
     return list_feed, keys_count
 

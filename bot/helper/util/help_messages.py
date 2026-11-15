@@ -2,40 +2,40 @@ from ..telegram.bot_commands import BotCommands
 from ...core.telegram_manager import TgClient
 from ..storage.copy_presets import MAX_DESTS, MAX_PRESETS
 
-leech = """<b>Send link along with command line or </b>
+leech = """<b>Send link along with command line or</b>
 
 /cmd link
 
-<b>By replying to link/file</b>:
+<b>By replying to link/file:</b>
 
 /cmd -n new name -e
 
-<b>Options before the task starts</b>: the command is answered with a keyboard of these options, with the ones already in your command switched on. Toggle them, press Start, and the task runs with what the keyboard says. An option that needs a value (-n, -sp) asks you to type it, and -e and -z ask for their password when you switch them on: answer both by replying to the keyboard message, which is the only shape of answer a bot is sure to receive in a group. Copy preset (-c) has a page of its own, reached from the Copy Destination button.
+<b>Options before the task starts:</b> the command is answered with a keyboard of these options, with the ones already in your command switched on. Toggle them, press Start, and the task runs with what the keyboard says. An option that needs a value (-n, -sp) asks you to type it, and -e and -z ask for their password when you switch them on: answer both by replying to the keyboard message, which is the only shape of answer a bot is sure to receive in a group. Copy preset (-c) has a page of its own, reached from the Copy Destination button.
 
 <b>NOTE:</b>
 1. Commands that start with <b>qb</b> are ONLY for torrents."""
 
-yt = """<b>Send link along with command line</b>:
+yt = """<b>Send link along with command line:</b>
 
 /cmd link
-<b>By replying to link</b>:
+<b>By replying to link:</b>
 /cmd -n new name -z password -opt x:y|x1:y1
 
-<b>Options before the task starts</b>: the command is answered with a keyboard of these options, with the ones already in your command switched on. Toggle them, press Start, and the task runs with what the keyboard says. An option that needs a value (-n, -sp) asks you to type it, and -z asks for its password when you switch it on: answer both by replying to the keyboard message, which is the only shape of answer a bot is sure to receive in a group. Copy preset (-c) has a page of its own, reached from the Copy Destination button.
+<b>Options before the task starts:</b> the command is answered with a keyboard of these options, with the ones already in your command switched on. Toggle them, press Start, and the task runs with what the keyboard says. An option that needs a value (-n, -sp) asks you to type it, and -z asks for its password when you switch it on: answer both by replying to the keyboard message, which is the only shape of answer a bot is sure to receive in a group. Copy preset (-c) has a page of its own, reached from the Copy Destination button.
 
 Check here all supported <a href='https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md'>SITES</a>
 Check all yt-dlp api options from this <a href='https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py#L212'>FILE</a> or use this <a href='https://t.me/mltb_official_channel/177'>script</a> to convert cli arguments to api options."""
 
-new_name = """<b>New Name</b>: -n
+new_name = """<b>New Name:</b> -n
 
 /cmd link -n new name
 Note: Doesn't work with torrents"""
 
-multi_link = """<b>Multi links only by replying to first link/file</b>: -i
+multi_link = """<b>Multi links only by replying to first link/file:</b> -i
 
 /cmd -i 10(number of links/files)"""
 
-same_dir = """<b>Move file(s)/folder(s) to new folder</b>: -m
+same_dir = """<b>Move file(s)/folder(s) to new folder:</b> -m
 
 You can use this arg also to move multiple links/torrents contents to the same directory, so all links will be uploaded together as one task
 
@@ -57,16 +57,16 @@ link5 will uploaded alone inside new folder named folder3
 link6 will get uploaded normally alone
 """
 
-thumb = """<b>Thumbnail for current task</b>: -t
+thumb = """<b>Thumbnail for current task:</b> -t
 
 /cmd link -t tg-message-link (doc or photo) or none (file without thumb)"""
 
-split_size = """<b>Split size for current task</b>: -sp
+split_size = """<b>Split size for current task:</b> -sp
 
 /cmd link -sp (500mb or 2gb or 4000000000)
 Note: Only mb and gb are supported or write in bytes without unit!"""
 
-bulk = """<b>Bulk Download</b>: -b
+bulk = """<b>Bulk Download:</b> -b
 
 Bulk can be used only by replying to text message or text file contains links separated by new line.
 Example:
@@ -81,14 +81,14 @@ You can set start and end of the links from the bulk like seed, with -b start:en
 The range counts links from 1 and includes both ends, so -b 3401:3500 takes the 3401st link through the 3500th (100 links).
 The default is from the first link to the last."""
 
-extract_zip = """<b>Extract/Zip</b>: -e -z
+extract_zip = """<b>Extract/Zip:</b> -e -z
 
 /cmd link -e password (extract password protected)
 /cmd link -z password (zip password protected)
 /cmd link -z password -e (extract and zip password protected)
 Note: When both extract and zip added with cmd it will extract first and then zip, so always extract first"""
 
-join = """<b>Join Splitted Files</b>: -j
+join = """<b>Join Splitted Files:</b> -j
 
 This option will only work before extract and zip, so mostly it will be used with -m argument (samedir)
 By Reply:
@@ -97,7 +97,7 @@ By Reply:
 if u have link(folder) have splitted files:
 /cmd link -j"""
 
-tg_links = f"""<b>TG Links</b>:
+tg_links = f"""<b>TG Links:</b>
 
 Treat links like any direct link
 Some links need user access so you must add USER_SESSION_STRING for it.
@@ -118,53 +118,53 @@ only a switch, not a host filter; it must come right after the link, before
 any other option.
 No link at all: a private chat -- a DM with a person or with a bot -- has neither a public nor a tg:// link you can copy. Use /{BotCommands.PrivateLeechCommand[0]} chat count instead, which needs your own session (/{BotCommands.LoginCommand}) for any chat the bot is not part of."""
 
-sample_video = """<b>Sample Video</b>: -sv
+sample_video = """<b>Sample Video:</b> -sv
 
 Create sample video for one video or folder of videos.
 /cmd -sv (it will take the default values which 60sec sample duration and part duration is 4sec).
 You can control those values. Example: /cmd -sv 70:5(sample-duration:part-duration) or /cmd -sv :5 or /cmd -sv 70."""
 
-screenshot = """<b>ScreenShots</b>: -ss
+screenshot = """<b>ScreenShots:</b> -ss
 
 Create screenshots for one video or folder of videos.
 /cmd -ss (it will take the default values which is 10 photos).
 You can control this value. Example: /cmd -ss 6."""
 
-seed = """<b>Bittorrent seed</b>: -d
+seed = """<b>Bittorrent seed:</b> -d
 
 /cmd link -d ratio:seed_time or by replying to file/link
 To specify ratio and seed time add -d ratio:time.
 Example: -d 0.7:10 (ratio and time) or -d 0.7 (only ratio) or -d :10 (only time) where time in minutes"""
 
-zip_arg = """<b>Zip</b>: -z password
+zip_arg = """<b>Zip:</b> -z password
 
 /cmd link -z (zip)
 /cmd link -z password (zip password protected)"""
 
-qual = """<b>Quality Buttons</b>: -s
+qual = """<b>Quality Buttons:</b> -s
 
 In case default quality added from yt-dlp options using format option and you need to select quality for specific link or links with multi links feature.
 /cmd link -s"""
 
-yt_opt = """<b>Options</b>: -opt
+yt_opt = """<b>Options:</b> -opt
 
 /cmd link -opt {"format": "bv*+mergeall[vcodec=none]", "nocheckcertificate": True, "playliststart": 10, "fragment_retries": float("inf"), "matchtitle": "S13", "writesubtitles": True, "live_from_start": True, "postprocessor_args": {"ffmpeg": ["-threads", "4"]}, "wait_for_video": (5, 100), "download_ranges": [{"start_time": 0, "end_time": 10}]}
 
 Check all yt-dlp api options from this <a href='https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py#L184'>FILE</a> or use this <a href='https://t.me/mltb_official_channel/177'>script</a> to convert cli arguments to api options."""
 
-convert_media = """<b>Convert Media</b>: -ca -cv
+convert_media = """<b>Convert Media:</b> -ca -cv
 /cmd link -ca mp3 -cv mp4 (convert all audios to mp3 and all videos to mp4)
 /cmd link -ca mp3 (convert all audios to mp3)
 /cmd link -cv mp4 (convert all videos to mp4)
 /cmd link -ca mp3 + flac ogg (convert only flac and ogg audios to mp3)
 /cmd link -cv mkv - webm flv (convert all videos to mp4 except webm and flv)"""
 
-force_start = """<b>Force Start</b>: -f -fd -fu
+force_start = """<b>Force Start:</b> -f -fd -fu
 /cmd link -f (force download and upload)
 /cmd link -fd (force download only)
 /cmd link -fu (force upload directly after download finish)"""
 
-name_sub = r"""<b>Name Substitution</b>: -ns
+name_sub = r"""<b>Name Substitution:</b> -ns
 /cmd link -ns script/code/s | mirror/leech | tea/ /s | clone | cpu/ | \[mltb\]/mltb | \\text\\/text/s
 This will affect on all files. Format: wordToReplace/wordToReplaceWith/sensitiveCase
 Word Subtitions. You can add pattern instead of normal text. Timeout: 60 sec
@@ -178,15 +178,15 @@ NOTE: You must add \ before any character, those are the characters: \^$.|?*+()[
 8. \text\ will get replaced by text with sensitive case
 """
 
-transmission = """<b>Tg transmission</b>: -hl -ut -bt
+transmission = """<b>Tg transmission:</b> -hl -ut -bt
 /cmd link -hl (leech by user and bot session with respect to size) (Hybrid Leech)
 /cmd link -bt (leech by bot session)
 /cmd link -ut (leech by user)"""
 
-thumbnail_layout = """Thumbnail Layout: -tl
+thumbnail_layout = """<b>Thumbnail Layout:</b> -tl
 /cmd link -tl 3x3 (widthxheight) 3 photos in row and 3 photos in column"""
 
-copy_preset = f"""<b>Copy Preset</b>: -c
+copy_preset = f"""<b>Copy Preset:</b> -c
 /cmd link -c anime
 
 Copies every album this task uploads to the chats saved under that preset name. Presets are made in usetting -> Leech -> Copy Presets: up to {MAX_PRESETS} of them, each holding up to {MAX_DESTS} chats written as chat_id or chat_id|thread_id (the thread id addresses one topic of a forum).
@@ -196,11 +196,11 @@ Notes:
 3. The bot has to be able to post to every chat in the preset, or the task is refused before it downloads anything and told you which chat failed.
 4. A task that already finished can still be sent to a preset afterwards: /copy its Task ID."""
 
-leech_as = """<b>Leech as</b>: -doc -med
+leech_as = """<b>Leech as:</b> -doc -med
 /cmd link -doc (Leech as document)
 /cmd link -med (Leech as media)"""
 
-ffmpeg_cmds = """<b>FFmpeg Commands</b>: -ff
+ffmpeg_cmds = """<b>FFmpeg Commands:</b> -ff
 list of lists of ffmpeg commands. You can set multiple ffmpeg commands for all files before upload. Don't write ffmpeg at beginning, start directly with the arguments.
 Notes:
 1. Add <code>-del</code> to the list(s) which you want from the bot to delete the original files after command run complete!
@@ -213,7 +213,7 @@ Here I will explain how to use mltb.* which is reference to files you want to wo
 4. Fourth cmd: the input is mltb.audio so this cmd will work on all audios and the output is mltb.mp3 so the output extension is mp3.
 5. Fifth cmd: You can add telegram link for small size input like photo to set watermark"""
 
-alldebrid_arg = """<b>AllDebrid Unlock</b>: -ad
+alldebrid_arg = """<b>AllDebrid Unlock:</b> -ad
 
 /cmd link -ad
 Resolves filehost links (1fichier, rapidgator, mega, etc.) via the
@@ -227,7 +227,7 @@ entirely so dead torrents finish faster on a debrid plan.
 
 Requires <code>ALLDEBRID_API_KEY</code> in the bot configuration."""
 
-torbox_arg = """<b>TorBox Unlock</b>: -tb
+torbox_arg = """<b>TorBox Unlock:</b> -tb
 
 /cmd link -tb
 Routes normal web/filehost links through TorBox WebDL.
@@ -238,7 +238,7 @@ waits for TorBox to finish/cache it, then downloads each file from TorBox CDN li
 
 Requires <code>TORBOX_API_KEY</code> in bot configuration."""
 
-upload_destination = """<b>Upload Destination</b>: -s3 -tg
+upload_destination = """<b>Upload Destination:</b> -s3 -tg
 
 /cmd link -s3
 Upload the finished files to the configured S3-compatible bucket (Cloudflare R2 for this bot) instead of sending them to Telegram. Everything one task downloads lands in a single folder named after the task id, and the completion message carries one link to that folder.
@@ -275,7 +275,7 @@ YT_HELP_DICT = {
     "Destination": upload_destination,
 }
 
-stream_upload = """<b>Stream Upload</b>: -su
+stream_upload = """<b>Stream Upload:</b> -su
 
 Upload each file the moment it finishes downloading, then delete it from disk
 before the next one starts. The task never waits for an upload slot, so
@@ -294,10 +294,10 @@ Torrents are unaffected: a magnet downloads and seeds as usual.
 LEECH_HELP_DICT = {
     "main": leech,
     "New-Name": new_name,
-    "DL-Auth": "<b>Direct link authorization</b>: -au -ap\n\n/cmd link -au username -ap password",
-    "Headers": "<b>Direct link custom headers</b>: -h\n\n/cmd link -h key:value|key1:value1",
+    "DL-Auth": "<b>Direct link authorization:</b> -au -ap\n\n/cmd link -au username -ap password",
+    "Headers": "<b>Direct link custom headers:</b> -h\n\n/cmd link -h key:value|key1:value1",
     "Extract/Zip": extract_zip,
-    "Select-Files": "<b>Bittorrent File Selection</b>: -s\n\n/cmd link -s or by replying to file/link",
+    "Select-Files": "<b>Bittorrent File Selection:</b> -s\n\n/cmd link -s or by replying to file/link",
     "Torrent-Seed": seed,
     "Multi-Link": multi_link,
     "Same-Directory": same_dir,

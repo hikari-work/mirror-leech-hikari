@@ -285,7 +285,7 @@ async def test_the_dropped_flags_are_named_in_the_task_message(queues, tg, monke
     assert "Note: -sp ignored:" in message
     assert "Note: -d ignored:" in message
     # and the task's own numbers are still there
-    assert "<b>Task ID: </b><code>101</code>" in message
+    assert "<b>Task ID:</b> <code>101</code>" in message
 
 
 # ── the direct downloader, which is the port that already streamed ───

@@ -78,16 +78,26 @@ async def search(key, site, message, method):
             if "error" in search_results or search_results["total"] == 0:
                 await edit_message(
                     message,
-                    f"No result found for <i>{key}</i>\nTorrent Site:- <i>{api_sites().get(site)}</i>",
+                    f"<b>No result found for <i>{key}</i></b>\n"
+                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>",
                 )
                 return
             msg = f"<b>Found {min(search_results['total'], TELEGRAPH_LIMIT)}</b>"
             if method == "apitrend":
-                msg += f" <b>trending result(s)\nTorrent Site:- <i>{api_sites().get(site)}</i></b>"
+                msg += (
+                    f" trending result(s)\n"
+                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>"
+                )
             elif method == "apirecent":
-                msg += f" <b>recent result(s)\nTorrent Site:- <i>{api_sites().get(site)}</i></b>"
+                msg += (
+                    f" recent result(s)\n"
+                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>"
+                )
             else:
-                msg += f" <b>result(s) for <i>{key}</i>\nTorrent Site:- <i>{api_sites().get(site)}</i></b>"
+                msg += (
+                    f" result(s) for <i>{key}</i>\n"
+                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>"
+                )
             search_results = search_results["data"]
         except Exception as e:
             await edit_message(message, str(e))
@@ -111,11 +121,15 @@ async def search(key, site, message, method):
         if total_results == 0:
             await edit_message(
                 message,
-                f"No result found for <i>{key}</i>\nTorrent Site:- <i>{site.capitalize()}</i>",
+                f"<b>No result found for <i>{key}</i></b>\n"
+                f"<b>Torrent Site:</b> <i>{site.capitalize()}</i>",
             )
             return
         msg = f"<b>Found {min(total_results, TELEGRAPH_LIMIT)}</b>"
-        msg += f" <b>result(s) for <i>{key}</i>\nTorrent Site:- <i>{site.capitalize()}</i></b>"
+        msg += (
+            f" result(s) for <i>{key}</i>\n"
+            f"<b>Torrent Site:</b> <i>{site.capitalize()}</i>"
+        )
         await TorrentManager.qbittorrent.search.delete(search_id)
     link = await get_result(search_results, key, message, method)
     buttons = ButtonMaker()
@@ -127,13 +141,13 @@ async def search(key, site, message, method):
 async def get_result(search_results, key, message, method):
     telegraph_content = []
     if method == "apirecent":
-        msg = "<h4>API Recent Results</h4>"
+        msg = "<b>API Recent Results</b>"
     elif method == "apisearch":
-        msg = f"<h4>API Search Result(s) For {key}</h4>"
+        msg = f"<b>API Search Result(s) For {key}</b>"
     elif method == "apitrend":
-        msg = "<h4>API Trending Results</h4>"
+        msg = "<b>API Trending Results</b>"
     else:
-        msg = f"<h4>PLUGINS Search Result(s) For {key}</h4>"
+        msg = f"<b>PLUGINS Search Result(s) For {key}</b>"
     for index, result in enumerate(search_results, start=1):
         if method.startswith("api"):
             try:
@@ -141,8 +155,8 @@ async def get_result(search_results, key, message, method):
                     msg += f"<code><a href='{result['url']}'>{escape(result['name'])}</a></code><br>"
                 if "torrents" in result.keys():
                     for subres in result["torrents"]:
-                        msg += f"<b>Quality: </b>{subres['quality']} | <b>Type: </b>{subres['type']} | "
-                        msg += f"<b>Size: </b>{subres['size']}<br>"
+                        msg += f"<b>Quality:</b> {subres['quality']} | <b>Type:</b> {subres['type']} | "
+                        msg += f"<b>Size:</b> {subres['size']}<br>"
                         if "torrent" in subres.keys():
                             msg += f"<a href='{subres['torrent']}'>Direct Link</a><br>"
                         elif "magnet" in subres.keys():
@@ -150,9 +164,9 @@ async def get_result(search_results, key, message, method):
                             msg += f"<a href='http://t.me/share/url?url={subres['magnet']}'>Telegram</a><br>"
                     msg += "<br>"
                 else:
-                    msg += f"<b>Size: </b>{result['size']}<br>"
+                    msg += f"<b>Size:</b> {result['size']}<br>"
                     try:
-                        msg += f"<b>Seeders: </b>{result['seeders']} | <b>Leechers: </b>{result['leechers']}<br>"
+                        msg += f"<b>Seeders:</b> {result['seeders']} | <b>Leechers:</b> {result['leechers']}<br>"
                     except KeyError:
                         pass
                     if "torrent" in result.keys():
@@ -166,8 +180,8 @@ async def get_result(search_results, key, message, method):
                 continue
         else:
             msg += f"<a href='{result.descrLink}'>{escape(result.fileName)}</a><br>"
-            msg += f"<b>Size: </b>{get_readable_file_size(result.fileSize)}<br>"
-            msg += f"<b>Seeders: </b>{result.nbSeeders} | <b>Leechers: </b>{result.nbLeechers}<br>"
+            msg += f"<b>Size:</b> {get_readable_file_size(result.fileSize)}<br>"
+            msg += f"<b>Seeders:</b> {result.nbSeeders} | <b>Leechers:</b> {result.nbLeechers}<br>"
             link = result.fileUrl
             if link.startswith("magnet:"):
                 msg += f"<b>Share Magnet to</b> <a href='http://t.me/share/url?url={quote(link)}'>Telegram</a><br><br>"
@@ -283,17 +297,20 @@ async def torrent_search_update(_, query):
                 endpoint = "Recent" if method == "apirecent" else "Trending"
                 await edit_message(
                     message,
-                    f"<b>Listing {endpoint} Items...\nTorrent Site:- <i>{api_sites().get(site)}</i></b>",
+                    f"<b>Listing {endpoint} Items...</b>\n"
+                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>",
                 )
             else:
                 await edit_message(
                     message,
-                    f"<b>Searching for <i>{key}</i>\nTorrent Site:- <i>{api_sites().get(site)}</i></b>",
+                    f"<b>Searching for <i>{key}</i></b>\n"
+                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>",
                 )
         else:
             await edit_message(
                 message,
-                f"<b>Searching for <i>{key}</i>\nTorrent Site:- <i>{site.capitalize()}</i></b>",
+                f"<b>Searching for <i>{key}</i></b>\n"
+                f"<b>Torrent Site:</b> <i>{site.capitalize()}</i>",
             )
         await search(key, site, message, method)
     else:
