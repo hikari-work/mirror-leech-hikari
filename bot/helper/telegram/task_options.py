@@ -92,7 +92,7 @@ class Option:
     group: str = ""
     """Flags sharing a group are mutually exclusive; "" means it stands alone."""
 
-    commands: tuple[str, ...] = ("leech", "ytdl")
+    commands: tuple[str, ...] = ("leech", "ytdl", "mirror")
     """Which commands offer it."""
 
 
@@ -101,14 +101,20 @@ OPTIONS: dict[str, Option] = {
     "-sp": Option("Split", "split_size", VALUE),
     "-c": Option("Copy Destination", "copy_preset", PRESET),
     "-z": Option("Zip", "compress", EXTRA),
-    "-e": Option("Extract", "extract", EXTRA, commands=("leech",)),
+    "-e": Option("Extract", "extract", EXTRA, commands=("leech", "mirror")),
     "-s": Option("Select", "select", BOOL),
     "-ss": Option("Screenshots", "screen_shots", BOOL),
     "-doc": Option("As doc", "as_doc", BOOL, group="format"),
     "-med": Option("As media", "as_med", BOOL, group="format"),
     "-su": Option("Stream", "stream_upload", BOOL, commands=("leech",)),
-    "-s3": Option("S3", "is_s3", BOOL, group="destination"),
-    "-tg": Option("Telegram", "is_tg", BOOL, group="destination"),
+    # /mirror goes to FTP whatever these say, so offering them would only allow
+    # a choice that is not one.
+    "-s3": Option(
+        "S3", "is_s3", BOOL, group="destination", commands=("leech", "ytdl")
+    ),
+    "-tg": Option(
+        "Telegram", "is_tg", BOOL, group="destination", commands=("leech", "ytdl")
+    ),
 }
 """The flags this keyboard offers, in the order their buttons appear.
 

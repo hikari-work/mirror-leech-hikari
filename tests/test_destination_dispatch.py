@@ -14,8 +14,10 @@ from types import SimpleNamespace
 import pytest
 
 import bot.helper.listeners.task_listener as tl
+from bot.helper.progress.ftp_status import FTPUploadStatus
 from bot.helper.progress.s3_status import S3UploadStatus
 from bot.helper.progress.telegram_status import TelegramStatus
+from bot.helper.upload.ftp_uploader import FTPUploader
 from bot.helper.upload.s3_uploader import S3Uploader
 from bot.helper.upload.telegram_uploader import TelegramUploader
 from bot.helper.util.status_utils import MirrorStatus
@@ -56,22 +58,24 @@ def no_disk(monkeypatch):
 
 
 def test_there_is_a_row_per_destination():
-    assert set(tl._DESTINATIONS) == {"tg", "s3"}
+    assert set(tl._DESTINATIONS) == {"tg", "s3", "ftp"}
 
 
 def test_each_row_names_the_object_that_does_the_work():
     assert tl._DESTINATIONS["tg"].uploader is TelegramUploader
     assert tl._DESTINATIONS["s3"].uploader is S3Uploader
+    assert tl._DESTINATIONS["ftp"].uploader is FTPUploader
 
 
 def test_only_the_message_size_ceiling_makes_splitting_necessary():
     assert tl._DESTINATIONS["tg"].splits is True
     assert tl._DESTINATIONS["s3"].splits is False
+    assert tl._DESTINATIONS["ftp"].splits is False
 
 
 @pytest.mark.parametrize(
     "destination, expected",
-    [("tg", TelegramStatus), ("s3", S3UploadStatus)],
+    [("tg", TelegramStatus), ("s3", S3UploadStatus), ("ftp", FTPUploadStatus)],
 )
 def test_each_row_builds_the_status_line_for_its_own_uploader(destination, expected):
     listener = SimpleNamespace(name="x", size=10)
@@ -97,8 +101,9 @@ async def test_a_telegram_task_splits_its_files():
     assert task.cleared is True
 
 
-async def test_a_bucket_task_splits_nothing():
-    task = FakeTask("s3")
+@pytest.mark.parametrize("destination", ["s3", "ftp"])
+async def test_a_remote_task_splits_nothing(destination):
+    task = FakeTask(destination)
 
     await task._run_post_processing("/dir/payload", "/dir", "gid")
 

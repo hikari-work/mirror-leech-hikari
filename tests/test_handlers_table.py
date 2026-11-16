@@ -56,6 +56,7 @@ EXPECTED_COMMANDS = [
     ("remove_from_queue", ["forcestart", "fs"], "auth"),
     ("bypass_scrape_cmd", ["bp", "bypass"], "auth"),
     ("leech", ["l", "leech"], "auth"),
+    ("mirror", ["m", "mirror"], "auth"),
     ("private_leech", ["pl", "pleech"], "auth"),
     ("qb_leech", ["qbleech", "ql"], "auth"),
     ("get_rss_menu", ["rss"], "auth"),

@@ -399,6 +399,7 @@ Here I will explain how to use mltb.* which is reference to files you want to wo
 help_string = f"""
 NOTE: Try each command without any argument to see more detalis.
 /{BotCommands.LeechCommand[0]} or /{BotCommands.LeechCommand[1]}: Start leeching to Telegram or, with <code>-s3</code>, to your bucket.
+/{BotCommands.MirrorCommand[0]} or /{BotCommands.MirrorCommand[1]}: Download a link and store the files on the bot's FTP server (FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_PATH in /{BotCommands.BotSetCommand[0]}). Same options as the leech command, except <code>-s3</code>, <code>-tg</code> and <code>-su</code>, which it ignores: it always uploads to FTP.
 /{BotCommands.QbLeechCommand[0]} or /{BotCommands.QbLeechCommand[1]}: Start leeching using qBittorrent.
 /{BotCommands.YtdlLeechCommand[0]} or /{BotCommands.YtdlLeechCommand[1]}: Leech yt-dlp supported link.
 /{BotCommands.PrivateLeechCommand[0]} or /{BotCommands.PrivateLeechCommand[1]} [chat] [count]: Leech the media out of a private chat, which has no link to paste. DMs with other people or bots are read with your own session, so /{BotCommands.LoginCommand} first.

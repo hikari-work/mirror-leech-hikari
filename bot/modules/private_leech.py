@@ -263,7 +263,9 @@ class PrivateLeech(Leech):
             f"/pleech {chat_spec}: starting {len(links)} task(s) from the last "
             f"{count} messages"
         )
-        await self._handle_bulk(links, self.options, BotCommands.LeechCommand[0])
+        await self._handle_bulk(
+            links, self.options, BotCommands.LeechCommand[0], obj=Leech
+        )
 
 
 async def private_leech(client, message):

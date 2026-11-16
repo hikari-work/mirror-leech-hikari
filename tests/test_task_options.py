@@ -278,6 +278,17 @@ def test_leech_is_offered_them():
     assert "-su" in offered
 
 
+def test_mirror_is_offered_the_common_flags_but_no_destination_choice():
+    """``/mirror`` uploads to FTP whatever a destination flag would say."""
+    offered = opts.options_for("mirror")
+
+    assert "-e" in offered
+    assert "-n" in offered
+    assert "-s3" not in offered
+    assert "-tg" not in offered
+    assert "-su" not in offered
+
+
 def test_the_state_of_a_command_holds_only_its_own_flags():
     state = opts.state_from(ytdl_args(), "ytdl")
 

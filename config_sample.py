@@ -80,9 +80,10 @@ QUEUE_UPLOAD = 0
 # gateway from rate-limiting the batch. 0 disables the gate.
 RESOLVE_CONCURRENCY = 4
 # Upload destination. "tg" sends the files to telegram as this bot always has;
-# "s3" puts them in a bucket as one folder per task, named after the task id
-# (10032/…), and the completion message carries a single link to that folder.
-# A single command overrides it with -s3 or -tg.
+# "s3" puts them in a bucket and "ftp" on an FTP server as one folder per task,
+# named after the task id (10032/…), with a single link to that folder in the
+# completion message. A single command overrides it with -s3 or -tg, and
+# /mirror always uploads to FTP.
 UPLOAD_DESTINATION = "tg"
 # The bucket -s3 uploads to. Cloudflare R2 is what these values look like in
 # practice, but any S3-compatible service takes the same four.
@@ -100,6 +101,16 @@ S3_KEY_PREFIX = ""
 S3_BROWSER_URL = ""
 # Parts of one multipart upload in flight at the same time.
 S3_MULTIPART_CONCURRENCY = 4
+# The FTP server a /mirror task uploads to. One folder per task is created
+# under FTP_PATH, named after the task id (FTP_PATH/10032/...), and the
+# completion message links to it with ftp://. FTP_HOST is a hostname only; the
+# port has its own value. FTP_TLS speaks explicit TLS (PROT P).
+FTP_HOST = ""
+FTP_PORT = 21
+FTP_USERNAME = ""
+FTP_PASSWORD = ""
+FTP_PATH = ""
+FTP_TLS = False
 # RSS
 RSS_DELAY = 600
 RSS_CHAT = ""
