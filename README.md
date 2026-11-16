@@ -502,6 +502,7 @@ sudo ip6tables-save | sudo tee /etc/iptables/rules.v6
 
 ```
 leech - or /l Upload to telegram
+mirror - or /m Download and upload to the bot's FTP server
 qbleech - or /ql Leech torrent using qBittorrent
 ytdlleech - or /yl Leech yt-dlp supported links
 bypass - or /bp Bypass and get the direct link

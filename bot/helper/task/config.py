@@ -70,11 +70,12 @@ class TaskConfig(
         self._alldebrid_magnet_id = 0
         self._torbox_torrent_id = 0
         self._torbox_web_id = 0
-        # Where this task's upload goes: "tg" or "s3". ``configured_destination``
-        # is what the bot config said; ``-s3`` / ``-tg`` override it per command
-        # -- see ``_apply_args``, the only writer of ``destination`` after this
-        # line. Both are kept because a flag has to be able to *drop* an
-        # override again, which needs somewhere to fall back to.
+        # Where this task's upload goes: "tg", "s3" or "ftp".
+        # ``configured_destination`` is what the bot config said; ``-s3`` /
+        # ``-tg`` override it per command -- see ``_apply_args``, the only writer
+        # of ``destination`` after this line. Both are kept because a flag has to
+        # be able to *drop* an override again, which needs somewhere to fall
+        # back to.
         self.configured_destination = (
             str(Config.UPLOAD_DESTINATION or "tg").strip().lower()
         )

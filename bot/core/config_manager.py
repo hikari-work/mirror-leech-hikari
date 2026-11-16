@@ -99,6 +99,18 @@ class Config:
     S3_BROWSER_URL = ""
     # Parts of one multipart upload in flight at the same time.
     S3_MULTIPART_CONCURRENCY = 4
+    # The FTP server a /mirror task uploads to. One folder per task is created
+    # under FTP_PATH, named after the task id, exactly like the bucket keys.
+    # FTP_HOST is a hostname only -- the port has a value of its own -- and
+    # FTP_TLS switches to explicit TLS (FTP_TLS + PROT P).
+    FTP_HOST = ""
+    FTP_PORT = 21
+    FTP_USERNAME = ""
+    # Shown in the settings menu like every other Config value, including this
+    # one. Rotate it if that matters more than the convenience.
+    FTP_PASSWORD = ""
+    FTP_PATH = ""
+    FTP_TLS = False
     SEARCH_API_LINK = ""
     SEARCH_LIMIT = 0
     SEARCH_PLUGINS = []
@@ -137,8 +149,9 @@ class Config:
     THUMBNAIL_LAYOUT = ""
     TORRENT_TIMEOUT = 0
     # Where a finished download goes: "tg" (telegram messages, the behaviour this
-    # bot has always had) or "s3" (objects in a bucket, reported as one link to
-    # the task's folder). A single task overrides it with ``-s3`` / ``-tg``.
+    # bot has always had), "s3" (objects in a bucket) or "ftp" (files on an FTP
+    # server), the last two reported as one link to the task's folder. A single
+    # task overrides it with ``-s3`` / ``-tg``, and /mirror always uses FTP.
     UPLOAD_DESTINATION = "tg"
     UPSTREAM_REPO = ""
     UPSTREAM_BRANCH = "master"

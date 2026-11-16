@@ -24,6 +24,7 @@ from ... import (
 )
 from ...core.config_manager import Config
 from ...core.torrent_manager import TorrentManager
+from ..progress.ftp_status import FTPUploadStatus
 from ..progress.queue_status import QueueStatus
 from ..progress.s3_status import S3UploadStatus
 from ..progress.telegram_status import TelegramStatus
@@ -37,6 +38,7 @@ from ..telegram.message_utils import (
     send_message,
     update_status_message,
 )
+from ..upload.ftp_uploader import FTPUploader
 from ..upload.s3_uploader import S3Uploader
 from ..upload.telegram_uploader import TelegramUploader
 from ..util.files_utils import (
@@ -726,12 +728,12 @@ def _telegram_upload_status(listener, obj, gid) -> TelegramStatus:
 
 @dataclass(frozen=True)
 class _Destination:
-    """How the two upload destinations differ.
+    """How the upload destinations differ.
 
     Three differences in one row: which object does the work, which status line
     reports it, and whether the size ceiling it uploads through makes splitting
-    the files necessary at all. Kept as data rather than as branches so that a
-    third destination becomes a row instead of a flag threaded through the
+    the files necessary at all. Kept as data rather than as branches so that
+    another destination becomes a row instead of a flag threaded through the
     pipeline.
     """
 
@@ -743,4 +745,5 @@ class _Destination:
 _DESTINATIONS: dict[str, _Destination] = {
     "tg": _Destination(TelegramUploader, _telegram_upload_status, splits=True),
     "s3": _Destination(S3Uploader, S3UploadStatus, splits=False),
+    "ftp": _Destination(FTPUploader, FTPUploadStatus, splits=False),
 }

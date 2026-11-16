@@ -23,6 +23,7 @@ from bot.helper.util.task_args import (
     strip_link_tokens,
 )
 from bot.modules.leech import Leech
+from bot.modules.mirror import Mirror
 from bot.modules.ytdlp import YtDlp
 
 DEST = -1001234567890
@@ -223,3 +224,35 @@ def test_both_commands_document_the_destination_option(help_dict):
 
 def test_the_command_list_mentions_the_bucket():
     assert "-s3" in help_string
+
+
+# ── /mirror is FTP by definition ────────────────────────────────────
+
+
+def mirror(*tokens):
+    listener = Mirror(
+        SimpleNamespace(), command_message("/mirror http://example.com/a.mkv")
+    )
+    listener._apply_args(parse_leech_args(list(tokens)))
+    return listener
+
+
+@pytest.mark.parametrize("configured", ["tg", "s3", "ftp"])
+def test_mirror_always_goes_to_ftp(monkeypatch, configured):
+    """The config chooses where /leech goes, never where /mirror goes."""
+    monkeypatch.setattr(Config, "UPLOAD_DESTINATION", configured)
+
+    assert mirror("http://example.com/a.mkv").destination == "ftp"
+
+
+def test_mirror_ignores_the_destination_flags(monkeypatch):
+    monkeypatch.setattr(Config, "UPLOAD_DESTINATION", "tg")
+
+    assert mirror("http://example.com/a.mkv", "-s3", "-tg").destination == "ftp"
+
+
+def test_mirror_drops_the_options_only_a_telegram_upload_honours():
+    listener = mirror("http://example.com/a.mkv", "-su", "-ss")
+
+    assert listener.stream_upload is False
+    assert listener.screen_shots is False

@@ -29,6 +29,11 @@ class CommandTask(TaskListener):
     here is what ``dispatch_bulk`` and ``run_multi`` pass.
     """
 
+    forced_destination = ""
+    """A destination this command always uses, whatever the config or the
+    ``-s3`` / ``-tg`` flags say. ``/mirror`` sets it to ``"ftp"``; empty leaves
+    the choice to ``UPLOAD_DESTINATION`` and the flags."""
+
     def __init__(
         self,
         client,
@@ -88,13 +93,19 @@ class CommandTask(TaskListener):
         # only the flagged ones -- is what lets this run more than once: the
         # option keyboard re-applies the args after every toggle, and a task
         # that was put on s3 by hand has to be able to come back off it.
-        if args.is_s3:
+        # A command with a destination of its own (/mirror) comes first: its
+        # flags are not offered on the keyboard, so a flag reaching here would
+        # be one typed on the command line and silently overruled -- which is
+        # what forcing means, and the help says so.
+        if self.forced_destination:
+            self.destination = self.forced_destination
+        elif args.is_s3:
             self.destination = "s3"
         elif args.is_tg:
             self.destination = "tg"
         else:
             self.destination = self.configured_destination
-        if self.destination == "s3":
+        if self.destination != "tg":
             # Both of these exist to feed the telegram uploader, and both do
             # their work *during* the download: -su picks TelegramUploader
             # inside DirectListener's streaming path, before any destination is

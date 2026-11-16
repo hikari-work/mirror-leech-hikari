@@ -55,6 +55,18 @@ from ..helper.telegram.task_options import ask_options
 
 
 class Leech(CommandTask):
+    """`/leech` and `/qbleech`, and the base of `/mirror`.
+
+    Three class attributes name where a task came from, so a subclass moves them
+    instead of copying this class: the handler recorded for restart recovery, the
+    command a bulk child is spawned with, and the option-keyboard key that
+    decides which flags are offered. ``/mirror`` overrides all three.
+    """
+
+    handler = "leech"
+    command = BotCommands.LeechCommand[0]
+    option_command = "leech"
+
     async def new_event(self):
         text = self.cmd_text.split("\n")
         input_list = text[0].split(" ")
@@ -66,7 +78,9 @@ class Leech(CommandTask):
         headers = args.headers
 
         if args.is_bulk:
-            await self.init_bulk(input_list, args.bulk_start, args.bulk_end, Leech)
+            await self.init_bulk(
+                input_list, args.bulk_start, args.bulk_end, type(self)
+            )
             return
 
         await self.register_same_dir()
@@ -74,7 +88,7 @@ class Leech(CommandTask):
         if len(self.bulk) != 0:
             del self.bulk[0]
 
-        await self.run_multi(input_list, Leech)
+        await self.run_multi(input_list, type(self))
         await self.get_tag(text)
 
         path = f"{DOWNLOAD_DIR}{self.mid}{self.folder_name}"
@@ -94,7 +108,7 @@ class Leech(CommandTask):
         # Last chance to change the options, and the last moment it is free to
         # take: the link is already known to be usable, and nothing has been
         # downloaded yet. Everything below reads the args as they come back.
-        if not await ask_options(self, args, "leech"):
+        if not await ask_options(self, args, self.option_command):
             return
 
         try:
@@ -185,7 +199,7 @@ class Leech(CommandTask):
 
         return reply_to, file_, session
 
-    async def _handle_bulk(self, links, options, cmd=None):
+    async def _handle_bulk(self, links, options, cmd=None, obj=None):
         """Start one task per link in ``links``, as a single batch.
 
         The options are handed in already stripped of the address that produced
@@ -193,6 +207,11 @@ class Leech(CommandTask):
         its own token, and a command that looked the links up itself has no
         token to strip. Either way every child gets its own link in front of
         these options.
+
+        *obj* is the class those children are built from, and defaults to the
+        command's own: ``/pleech`` is a ``PrivateLeech`` that reads a chat
+        history, so its children have to be plain ``Leech`` tasks or each one
+        would scan the same history again.
         """
         self.options = options
 
@@ -204,7 +223,7 @@ class Leech(CommandTask):
             self.options += f" -m bulk-{self.multi_tag}"
 
         try:
-            await self.dispatch_bulk(cmd or BotCommands.LeechCommand[0], links, Leech)
+            await self.dispatch_bulk(cmd or self.command, links, obj or type(self))
         except Exception as e:
             multi_tags.pop(self.multi_tag, None)
             LOGGER.error(f"Can't start bulk from telegram links: {e}")
@@ -309,7 +328,7 @@ class Leech(CommandTask):
             engine = "aria2"
         if not await self.record_active_task(
             args,
-            "leech",
+            self.handler,
             engine,
             qbit_tag(self.mid) if engine == "qbit" else "",
             path,

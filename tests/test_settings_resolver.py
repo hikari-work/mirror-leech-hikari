@@ -558,23 +558,28 @@ def test_no_dump_chats_configured_stays_an_empty_mapping():
 # ── a task bound for a bucket ───────────────────────────────────────
 
 
-class TestBucketDestination:
-    """The seven telegram steps below the first three do not apply to a bucket.
+class TestRemoteDestination:
+    """The seven telegram steps below the first three do not apply to a remote
+    folder -- a bucket or an FTP server.
 
     They are not merely wasted work: ``_resolve_upload_destination`` verifies the
     dump chat and raises "Chat not found!" for a task that was never going to
     post to one.
     """
 
-    async def test_nothing_telegram_runs_for_a_bucket_task(self, monkeypatch):
+    @pytest.mark.parametrize("destination", ["s3", "ftp"])
+    async def test_nothing_telegram_runs_for_a_remote_task(
+        self, monkeypatch, destination
+    ):
         async def explode(self):
-            raise AssertionError("a telegram step ran for a bucket task")
+            raise AssertionError("a telegram step ran for a remote task")
 
         monkeypatch.setattr(
             SettingsResolverMixin, "_resolve_upload_destination", explode
         )
         monkeypatch.setattr(sr, "s3_config_error", lambda: "")
-        listener = Listener(destination="s3")
+        monkeypatch.setattr(sr, "ftp_config_error", lambda: "")
+        listener = Listener(destination=destination)
 
         await listener.before_start()
 
@@ -601,11 +606,22 @@ class TestBucketDestination:
         with pytest.raises(ValueError, match="S3_BUCKET"):
             await listener.before_start()
 
+    async def test_a_task_with_no_ftp_server_to_land_in_fails_before_it_downloads(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            sr, "ftp_config_error", lambda: "FTP is not configured: set FTP_HOST"
+        )
+        listener = Listener(destination="ftp")
+
+        with pytest.raises(ValueError, match="FTP_HOST"):
+            await listener.before_start()
+
     def test_a_destination_this_bot_does_not_serve_is_named_back(self):
         listener = Listener(destination="aws")
 
         with pytest.raises(ValueError, match="'aws'"):
-            listener._resolve_s3_destination()
+            listener._resolve_remote_destination()
 
 
 # ── thumbnails ──────────────────────────────────────────────────────

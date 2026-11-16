@@ -21,6 +21,7 @@ from ..telegram.dest_chat import (
     verify_copy_target,
 )
 from ..telegram.message_utils import get_tg_link_message
+from ..upload.ftp_uploader import ftp_config_error
 from ..upload.s3_uploader import s3_config_error
 from ..util.bot_utils import get_size_bytes
 from ..util.links_utils import is_telegram_link
@@ -86,12 +87,12 @@ class SettingsResolverMixin(TaskConfigHost):
         Order matters: the destination has the last word on which session
         uploads, and that in turn decides how large a split may be.
 
-        A task bound for a bucket stops after the three steps that change what
-        lands on disk. Everything below them is about *telegram* delivery --
-        which chat, through which session, how big a piece may be, which album
-        or thumbnail to attach -- and none of it is read on the way to a bucket.
-        ``_resolve_upload_destination`` in particular can raise "Chat not found!"
-        for a task that was never going to post anything.
+        A task bound for a bucket or an FTP server stops after the three steps that
+        change what lands on disk. Everything below them is about *telegram*
+        delivery -- which chat, through which session, how big a piece may be,
+        which album or thumbnail to attach -- and none of it is read on the way to
+        a remote folder. ``_resolve_upload_destination`` in particular can raise
+        "Chat not found!" for a task that was never going to post anything.
 
         The per-user cap is checked first, before any of that work: a user who
         has already reached ``USER_QUEUE_MAX`` tasks or ``USER_QUEUE_SIZE_MAX``
@@ -106,7 +107,7 @@ class SettingsResolverMixin(TaskConfigHost):
         self._resolve_extension_filters()
         self._resolve_ffmpeg_commands()
         if self.destination != "tg":
-            self._resolve_s3_destination()
+            self._resolve_remote_destination()
             return
         await self._resolve_upload_destination()
         self._resolve_split_sizes()
@@ -116,8 +117,8 @@ class SettingsResolverMixin(TaskConfigHost):
         await self._resolve_copy_preset()
         await self._resolve_thumbnail()
 
-    def _resolve_s3_destination(self) -> None:
-        """Refuse a bucket-bound task that has no bucket to land in.
+    def _resolve_remote_destination(self) -> None:
+        """Refuse a file-server-bound task that has no server to land in.
 
         Both checks happen here rather than at the first upload so that a typo
         in the settings costs a message instead of a download: by the time an
@@ -126,15 +127,18 @@ class SettingsResolverMixin(TaskConfigHost):
 
         Unlike the telegram path there is no network probe, on purpose. An R2
         token scoped to "Object Read & Write" is not guaranteed to be allowed
-        ``HeadBucket``, so probing would fail tasks whose uploads would have
-        worked -- the wrong half of the trade.
+        ``HeadBucket``, and an FTP login spends a connection every task only a
+        transfer would need, so probing would fail tasks whose uploads would
+        have worked -- the wrong half of the trade.
         """
-        if self.destination != "s3":
+        checks = {"s3": s3_config_error, "ftp": ftp_config_error}
+        check = checks.get(self.destination)
+        if check is None:
             raise ValueError(
                 f"UPLOAD_DESTINATION is {self.destination!r}; this bot uploads"
-                " to 'tg' (telegram) or 's3' (a bucket)."
+                " to 'tg' (telegram), 's3' (a bucket) or 'ftp' (a server)."
             )
-        error = s3_config_error()
+        error = check()
         if error:
             raise ValueError(error)
 

@@ -154,11 +154,14 @@ async def _make_listener(row: dict, data: dict):
     """
     from ..core.telegram_manager import TgClient
     from ..modules.leech import Leech
+    from ..modules.mirror import Mirror
     from ..modules.ytdlp import YtDlp
 
     handler = data.get("handler")
     if handler == "leech":
         cls = Leech
+    elif handler == "mirror":
+        cls = Mirror
     elif handler == "ytdl":
         cls = YtDlp
     else:

@@ -35,3 +35,4 @@ class BotCommands:
     LoginCommand = f"login{i}"
     LogoutCommand = f"logout{i}"
     CopyCommand = f"copy{i}"
+    MirrorCommand = [f"mirror{i}", f"m{i}"]

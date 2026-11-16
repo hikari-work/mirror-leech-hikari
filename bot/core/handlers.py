@@ -60,6 +60,7 @@ from ..modules import (
     get_users_settings,
     leech,
     log,
+    mirror,
     ping,
     private_leech,
     qb_leech,
@@ -129,6 +130,7 @@ COMMAND_HANDLERS: tuple[_Command, ...] = (
     _Command(remove_from_queue, B.ForceStartCommand, _AUTH, desc="Force start task"),
     _Command(bypass_scrape_cmd, B.BypassCommand, _AUTH, desc="Bypass to a direct link"),
     _Command(leech, B.LeechCommand, _AUTH, desc="Leech to Telegram"),
+    _Command(mirror, B.MirrorCommand, _AUTH, desc="Mirror to FTP"),
     _Command(
         private_leech,
         B.PrivateLeechCommand,
