@@ -11,6 +11,7 @@ check which files come out of it.
 from __future__ import annotations
 
 import posixpath
+import ssl
 from ftplib import error_perm
 from pathlib import Path
 
@@ -90,6 +91,9 @@ class FakeFTP:
             raise error_perm("550 refused")
         self.stored[posixpath.join(self.here, name)] = bytes(data)
 
+    def voidresp(self):
+        return "226 Transfer complete"
+
     def quit(self):
         self.quit_called = True
 
@@ -109,6 +113,27 @@ class FakeTLS(FakeFTP):
 
     def prot_p(self):
         self.protected = True
+
+
+class FakeTLSWithoutCloseNotify(FakeTLS):
+    """Stores the file, then ends the data socket with a bare TCP close.
+
+    That is what ``ftplib`` reports as ``ssl.SSLEOFError`` from the ``unwrap``
+    it performs after the last block: the bytes are on the server and the
+    ``226`` reply is still waiting on the control channel.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.drained = 0
+
+    def storbinary(self, cmd, fp, blocksize=8192):
+        super().storbinary(cmd, fp, blocksize)
+        raise ssl.SSLEOFError("EOF occurred in violation of protocol")
+
+    def voidresp(self):
+        self.drained += 1
+        return "226 Transfer complete"
 
 
 @pytest.fixture
@@ -285,3 +310,22 @@ async def test_explicit_tls_protects_the_transfer(server, tmp_path, monkeypatch)
     assert FakeTLS.instances[0].protected is True
     # The plain server from the fixture was never opened.
     assert server.login_args is None
+
+
+async def test_a_missing_tls_close_notify_after_stor_is_not_a_failure(
+    server, tmp_path, monkeypatch
+):
+    FakeTLS.instances.clear()
+    monkeypatch.setattr(fpu, "FTP_TLS", FakeTLSWithoutCloseNotify)
+    monkeypatch.setattr(Config, "FTP_TLS", True)
+    tree(tmp_path, "10032/a.mkv")
+    listener = FakeListener()
+
+    await fpu.FTPUploader(listener, str(tmp_path / "10032")).upload()
+
+    assert listener.completed is not None
+    assert listener.completed[2] == 1
+    assert listener.completed[3] == 0
+    # The STOR reply the unwrap never read is drained, so the next command
+    # does not receive it as its own answer.
+    assert FakeTLS.instances[0].drained == 1

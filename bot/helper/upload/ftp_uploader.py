@@ -14,6 +14,7 @@ from the outside only ``upload``, ``processed_bytes``, ``speed`` and
 
 from __future__ import annotations
 
+import ssl
 from ftplib import FTP, FTP_TLS, error_perm
 from os import path as ospath
 from os import walk
@@ -283,11 +284,21 @@ class FTPUploader:
         self._error = ""
         try:
             with open(file_path, "rb") as file_obj:
-                ftp.storbinary(
-                    f"STOR {name}",
-                    _Reader(self, file_obj),
-                    blocksize=_BLOCKSIZE,
-                )
+                try:
+                    ftp.storbinary(
+                        f"STOR {name}",
+                        _Reader(self, file_obj),
+                        blocksize=_BLOCKSIZE,
+                    )
+                except ssl.SSLError:
+                    # ``storbinary`` unwraps the data socket after the last
+                    # block, and a server that ends the transfer with a bare
+                    # TCP close makes that unwrap raise "EOF occurred in
+                    # violation of protocol" -- after the bytes were stored.
+                    # The reply to STOR is still unread, so drain it here;
+                    # a genuine mid-transfer failure answers 4xx/5xx and the
+                    # outer handler counts it.
+                    ftp.voidresp()
         except _UploadCancelled:
             # the listener knows; the caller stops walking the rest
             raise
