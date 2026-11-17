@@ -50,7 +50,6 @@ DEFAULT_VALUES = {
     "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
     "RSS_DELAY": 600,
     "STATUS_UPDATE_INTERVAL": 15,
-    "SEARCH_LIMIT": 0,
     "UPSTREAM_BRANCH": "master",
 }
 
@@ -94,9 +93,7 @@ def _reschedule_status_intervals(value):
 
 async def _apply_config_change(key):
     """Restart whatever a freshly changed config value feeds."""
-    if key in ["SEARCH_PLUGINS", "SEARCH_API_LINK"]:
-        await initiate_search_tools()
-    elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
+    if key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
         await start_from_queued()
 
 
