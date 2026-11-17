@@ -186,11 +186,13 @@ def test_album_keeps_images_and_videos_in_one_folder(erome, monkeypatch):
             "path": "",
             "filename": "clip_720p.mp4",
             "url": "https://v86.erome.com/1/FVJdknNf/clip_720p.mp4",
+            "headers": ["Referer: https://www.erome.com/"],
         },
         {
             "path": "",
             "filename": "photo.jpg",
             "url": "https://s86.erome.com/1/FVJdknNf/photo.jpg?v=1",
+            "headers": ["Referer: https://www.erome.com/"],
         },
     ]
     # the album URL travels in ``q``, untouched

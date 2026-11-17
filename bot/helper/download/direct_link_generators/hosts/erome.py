@@ -78,6 +78,9 @@ def erome_entries(media: list, grouped: bool) -> list[dict]:
     the other. Names are deduplicated per folder, not across the listing: the
     same name in two albums is two files, and only a repeat inside one folder
     is a collision.
+    Every entry carries a ``Referer`` header: erome's video CDN rejects
+    requests without it (403), images work without it but the header is safe
+    for both.
     """
     taken: dict[str, set[str]] = {}
     contents: list[dict] = []
@@ -97,6 +100,7 @@ def erome_entries(media: list, grouped: bool) -> list[dict]:
                 "path": folder,
                 "filename": filename,
                 "url": link,
+                "headers": ["Referer: https://www.erome.com/"],
             }
         )
     return contents
