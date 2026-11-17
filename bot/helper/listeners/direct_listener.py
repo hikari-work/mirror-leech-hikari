@@ -91,6 +91,9 @@ class DirectListener:
             a2c_opt["dir"] = self._path
         filename = content["filename"]
         a2c_opt["out"] = filename
+        if entry_headers := content.get("headers"):
+            existing = a2c_opt.get("header", [])
+            a2c_opt["header"] = [*existing, *entry_headers]
         target = ospath.join(a2c_opt["dir"], filename)
         if gid := self._live.pop(target, ""):
             # Already coming down: poll the download that is already running
