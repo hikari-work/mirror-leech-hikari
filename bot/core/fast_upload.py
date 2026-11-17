@@ -368,6 +368,8 @@ async def _save_file(
             raise ValueError(f"Can't upload files bigger than {limit_mib} MiB")
 
         dc_id = await self.storage.dc_id()
+        if dc_id is None:
+            return await fallback(self, path, None, 0, progress, progress_args)
         sessions = await _media_sessions(self, dc_id, _session_count())
         if not sessions:
             return await fallback(self, path, None, 0, progress, progress_args)
