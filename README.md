@@ -354,14 +354,8 @@ options [HERE](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py#
 
 **8. Torrent Search**
 
-- `SEARCH_API_LINK` (`Str`): Search api app link. Get your api from deploying this [repository](https://github.com/Ryuk-me/Torrent-Api-py).
-    - Supported Sites:
-  > 1337x, Piratebay, Nyaasi, Torlock, Torrent Galaxy, Zooqle, Kickass, Bitsearch, MagnetDL, Libgen, YTS, Limetorrent,
-  TorrentFunk, Glodls, TorrentProject and YourBittorrent
-
-- `SEARCH_LIMIT` (`Int`): Search limit for search api, limit for each site and not overall result limit. Default is zero (Default api limit for each site).
-
-- `SEARCH_PLUGINS` (`List`): List of qBittorrent search plugins (github raw links). I have added some plugins, you can remove/add plugins as you want. Main Source: [qBittorrent Search Plugins (Official/Unofficial)](https://github.com/qbittorrent/search-plugins).
+- `/{BotCommands.SearchCommand} [query]` lists the piyann gateway's torrent providers, searches the one you tap, and pages the results in the message keyboard. Each result carries a button that sends its magnet and a link to the provider's page.
+- The provider list and the results come from `GATEWAY_URL` (`https://api.piyann.my.id` by default); set `GATEWAY_TOKEN` when the gateway requires a bearer token. No separate search API or qBittorrent search plugins are used.
 
 ------
 

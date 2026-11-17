@@ -1,318 +1,306 @@
-from httpx import AsyncClient
+"""Torrent search through the piyann gateway.
+
+``/search <key>`` lists the gateway's torrent providers; tapping one runs the
+search and paints the results as a paged rich message. Every result carries a
+button that sends its magnet and a link button to the provider's page -- the
+gateway gives those two, and a few providers have only the page (limetorrents
+returns ``magnet: null``), so a row shows the buttons it can honour.
+
+State lives in ``_SEARCHES``, keyed by user id: callback data is capped at 64
+bytes, so the query and the result list can only stay here. A new search for the
+same user replaces the old one, and the process owns no other copy.
+"""
+
+from dataclasses import dataclass, field
 from html import escape
-from urllib.parse import quote
+from typing import TYPE_CHECKING
+
+from httpx import AsyncClient
+from pyrogram.enums import ButtonStyle
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .. import LOGGER
-from ..core.config_manager import Config
-from ..core.torrent_manager import TorrentManager
-from ..helper.util.bot_utils import new_task
-from ..helper.util.status_utils import get_readable_file_size
-from ..helper.util.telegraph_helper import telegraph
+from ..helper.net.gateway import gateway_headers, gateway_url
 from ..helper.telegram.button_build import ButtonMaker
 from ..helper.telegram.message_utils import edit_message, message_text, send_message
+from ..helper.util.bot_utils import new_task
 
-PLUGINS = []
-SITES: dict[str, str] | None = None
-TELEGRAPH_LIMIT = 300
+if TYPE_CHECKING:
+    from pyrogram.types import CallbackQuery, Message
 
-
-def api_sites() -> dict[str, str]:
-    """The API's site list, on the paths that are reached only when it has one.
-
-    ``SITES`` stays None while SEARCH_API_LINK is unset or its fetch failed --
-    which is exactly when ``torrent_search`` offers no api button, so none of
-    the seven reads below is reachable. They are not the place to argue about
-    that, so the assumption is stated here.
-    """
-    return SITES  # pyrefly: ignore[bad-return]
+PROVIDERS: dict[str, str] | None = None
+PAGE_SIZE = 5
+REQUEST_TIMEOUT = 60
+ALL_PROVIDERS = "all"
 
 
-async def initiate_search_tools():
-    qb_plugins = await TorrentManager.qbittorrent.search.plugins()
-    if qb_plugins:
-        names = [plugin.name for plugin in qb_plugins]
-        await TorrentManager.qbittorrent.search.uninstall_plugin(names)
-        PLUGINS.clear()
-    if Config.SEARCH_PLUGINS:
-        await TorrentManager.qbittorrent.search.install_plugin(Config.SEARCH_PLUGINS)
+@dataclass
+class _SearchState:
+    key: str
+    provider: str
+    results: list[dict[str, object]]
+    failed: list[str]
+    page: int = field(default=1)
 
-    if Config.SEARCH_API_LINK:
-        global SITES
-        try:
-            async with AsyncClient() as client:
-                response = await client.get(f"{Config.SEARCH_API_LINK}/api/v1/sites")
-                data = response.json()
-            SITES = {
-                str(site): str(site).capitalize() for site in data["supported_sites"]
-            }
-            SITES["all"] = "All"
-        except Exception as e:
-            LOGGER.error(
-                f"{e} Can't fetching sites from SEARCH_API_LINK make sure use latest version of API"
+
+_SEARCHES: dict[int, _SearchState] = {}
+
+
+async def initiate_search_tools() -> None:
+    """Fetch the provider list the search menu and the renderer name from."""
+    global PROVIDERS
+    try:
+        async with AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.get(
+                gateway_url("/api/v1/scrape/torrent/providers"),
+                headers=gateway_headers(),
             )
-            SITES = None
+            response.raise_for_status()
+            data = response.json()
+        PROVIDERS = {str(p["id"]): str(p["name"]) for p in data["providers"]}
+        PROVIDERS[ALL_PROVIDERS] = "All"
+    except Exception as e:
+        LOGGER.error(f"Can't fetch torrent providers from the gateway: {e}")
+        PROVIDERS = None
 
 
-async def search(key, site, message, method):
-    if method.startswith("api"):
-        # "all" is a path segment rather than a query parameter, so the two
-        # halves vary together; every endpoint below takes the same pair.
-        scope = "all/" if site == "all" else ""
-        site_q = "" if site == "all" else f"site={site}&"
-        limit = Config.SEARCH_LIMIT
-        if method == "apisearch":
-            LOGGER.info(f"API Searching: {key} from {site}")
-            api = f"{Config.SEARCH_API_LINK}/api/v1/{scope}search?{site_q}query={key}&limit={limit}"
-        elif method == "apitrend":
-            LOGGER.info(f"API Trending from {site}")
-            api = (
-                f"{Config.SEARCH_API_LINK}/api/v1/{scope}trending?{site_q}limit={limit}"
-            )
-        else:
-            LOGGER.info(f"API Recent from {site}")
-            api = f"{Config.SEARCH_API_LINK}/api/v1/{scope}recent?{site_q}limit={limit}"
-        try:
-            async with AsyncClient() as client:
-                response = await client.get(api)
-                search_results = response.json()
-            if "error" in search_results or search_results["total"] == 0:
-                await edit_message(
-                    message,
-                    f"<b>No result found for <i>{key}</i></b>\n"
-                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>",
-                )
-                return
-            msg = f"<b>Found {min(search_results['total'], TELEGRAPH_LIMIT)}</b>"
-            if method == "apitrend":
-                msg += (
-                    f" trending result(s)\n"
-                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>"
-                )
-            elif method == "apirecent":
-                msg += (
-                    f" recent result(s)\n"
-                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>"
-                )
-            else:
-                msg += (
-                    f" result(s) for <i>{key}</i>\n"
-                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>"
-                )
-            search_results = search_results["data"]
-        except Exception as e:
-            await edit_message(message, str(e))
-            return
-    else:
-        LOGGER.info(f"PLUGINS Searching: {key} from {site}")
-        search = await TorrentManager.qbittorrent.search.start(
-            pattern=key, plugins=[site], category="all"
+def _provider_name(provider: str) -> str:
+    return (PROVIDERS or {}).get(provider, provider.capitalize())
+
+
+async def _search(
+    key: str, provider: str
+) -> tuple[list[dict[str, object]], list[str]]:
+    """The gateway's items and the providers that failed on the way."""
+    async with AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.get(
+            gateway_url("/api/v1/scrape/torrent/search"),
+            params={"q": key, "provider": provider},
+            headers=gateway_headers(),
         )
-        search_id = search.id
-        while True:
-            result_status = await TorrentManager.qbittorrent.search.status(search_id)
-            status = result_status[0].status
-            if status != "Running":
-                break
-        dict_search_results = await TorrentManager.qbittorrent.search.results(
-            id=search_id, limit=TELEGRAPH_LIMIT
-        )
-        search_results = dict_search_results.results
-        total_results = dict_search_results.total
-        if total_results == 0:
-            await edit_message(
-                message,
-                f"<b>No result found for <i>{key}</i></b>\n"
-                f"<b>Torrent Site:</b> <i>{site.capitalize()}</i>",
-            )
-            return
-        msg = f"<b>Found {min(total_results, TELEGRAPH_LIMIT)}</b>"
-        msg += (
-            f" result(s) for <i>{key}</i>\n"
-            f"<b>Torrent Site:</b> <i>{site.capitalize()}</i>"
-        )
-        await TorrentManager.qbittorrent.search.delete(search_id)
-    link = await get_result(search_results, key, message, method)
+        response.raise_for_status()
+        data = response.json()
+    if not data.get("success"):
+        raise RuntimeError(data.get("error") or "gateway search failed")
+    results = data.get("results") or []
+    failed = [str(e.get("provider", "?")) for e in data.get("errors") or []]
+    return results, failed
+
+
+def _cb(user_id: int, action: str, arg: str | int = "") -> str:
+    return f"torser:{user_id}:{action}:{arg}" if arg != "" else f"torser:{user_id}:{action}"
+
+
+def _provider_buttons(user_id: int) -> InlineKeyboardMarkup:
     buttons = ButtonMaker()
-    buttons.url_button("🔎 VIEW", link)
-    button = buttons.build_menu(1)
-    await edit_message(message, msg, button)
-
-
-async def get_result(search_results, key, message, method):
-    telegraph_content = []
-    if method == "apirecent":
-        msg = "<b>API Recent Results</b>"
-    elif method == "apisearch":
-        msg = f"<b>API Search Result(s) For {key}</b>"
-    elif method == "apitrend":
-        msg = "<b>API Trending Results</b>"
-    else:
-        msg = f"<b>PLUGINS Search Result(s) For {key}</b>"
-    for index, result in enumerate(search_results, start=1):
-        if method.startswith("api"):
-            try:
-                if "name" in result.keys():
-                    msg += f"<code><a href='{result['url']}'>{escape(result['name'])}</a></code><br>"
-                if "torrents" in result.keys():
-                    for subres in result["torrents"]:
-                        msg += f"<b>Quality:</b> {subres['quality']} | <b>Type:</b> {subres['type']} | "
-                        msg += f"<b>Size:</b> {subres['size']}<br>"
-                        if "torrent" in subres.keys():
-                            msg += f"<a href='{subres['torrent']}'>Direct Link</a><br>"
-                        elif "magnet" in subres.keys():
-                            msg += "<b>Share Magnet to</b> "
-                            msg += f"<a href='http://t.me/share/url?url={subres['magnet']}'>Telegram</a><br>"
-                    msg += "<br>"
-                else:
-                    msg += f"<b>Size:</b> {result['size']}<br>"
-                    try:
-                        msg += f"<b>Seeders:</b> {result['seeders']} | <b>Leechers:</b> {result['leechers']}<br>"
-                    except KeyError:
-                        pass
-                    if "torrent" in result.keys():
-                        msg += f"<a href='{result['torrent']}'>Direct Link</a><br><br>"
-                    elif "magnet" in result.keys():
-                        msg += "<b>Share Magnet to</b> "
-                        msg += f"<a href='http://t.me/share/url?url={quote(result['magnet'])}'>Telegram</a><br><br>"
-                    else:
-                        msg += "<br>"
-            except Exception:
-                continue
-        else:
-            msg += f"<a href='{result.descrLink}'>{escape(result.fileName)}</a><br>"
-            msg += f"<b>Size:</b> {get_readable_file_size(result.fileSize)}<br>"
-            msg += f"<b>Seeders:</b> {result.nbSeeders} | <b>Leechers:</b> {result.nbLeechers}<br>"
-            link = result.fileUrl
-            if link.startswith("magnet:"):
-                msg += f"<b>Share Magnet to</b> <a href='http://t.me/share/url?url={quote(link)}'>Telegram</a><br><br>"
-            else:
-                msg += f"<a href='{link}'>Direct Link</a><br><br>"
-
-        if len(msg.encode("utf-8")) > 39000:
-            telegraph_content.append(msg)
-            msg = ""
-
-        if index == TELEGRAPH_LIMIT:
-            break
-
-    if msg != "":
-        telegraph_content.append(msg)
-
-    await edit_message(
-        message, f"<b>Creating</b> {len(telegraph_content)} <b>Telegraph pages.</b>"
-    )
-    path = [
-        (
-            await telegraph.create_page(
-                title="Mirror-leech-bot Torrent Search", content=content
-            )
-        )["path"]
-        for content in telegraph_content
-    ]
-    if len(path) > 1:
-        await edit_message(
-            message, f"<b>Editing</b> {len(telegraph_content)} <b>Telegraph pages.</b>"
-        )
-        await telegraph.edit_telegraph(path, telegraph_content)
-    return f"https://telegra.ph/{path[0]}"
-
-
-def api_buttons(user_id, method):
-    buttons = ButtonMaker()
-    for data, name in api_sites().items():
-        buttons.data_button(name, f"torser {user_id} {data} {method}")
-    buttons.data_button("Cancel", f"torser {user_id} cancel")
-    return buttons.build_menu(2)
-
-
-async def plugin_buttons(user_id):
-    buttons = ButtonMaker()
-    if not PLUGINS:
-        pl = await TorrentManager.qbittorrent.search.plugins()
-        for i in pl:
-            PLUGINS.append(i.name)
-    for siteName in PLUGINS:
+    for provider, name in (PROVIDERS or {}).items():
         buttons.data_button(
-            siteName.capitalize(), f"torser {user_id} {siteName} plugin"
+            name,
+            _cb(user_id, "s", provider),
+            style=ButtonStyle.PRIMARY
+            if provider == ALL_PROVIDERS
+            else ButtonStyle.SUCCESS,
         )
-    buttons.data_button("All", f"torser {user_id} all plugin")
-    buttons.data_button("Cancel", f"torser {user_id} cancel")
+    buttons.data_button("Cancel", _cb(user_id, "c"), style=ButtonStyle.DANGER)
     return buttons.build_menu(2)
 
 
-@new_task
-async def torrent_search(_, message):
-    user_id = message.from_user.id
-    buttons = ButtonMaker()
-    key = message.text.split()
-    if SITES is None and not Config.SEARCH_PLUGINS:
-        await send_message(
-            message, "No API link or search PLUGINS added for this function"
+def render_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    """The message and keyboard for *page*, clamped into the result count."""
+    state = _SEARCHES[user_id]
+    total = len(state.results)
+    pages = max(1, -(-total // PAGE_SIZE))
+    state.page = min(max(page, 1), pages)
+    start = (state.page - 1) * PAGE_SIZE
+    lines = [
+        f"<b>Torrent Search</b> — <i>{escape(state.key)}</i>",
+        f"<b>Provider:</b> {escape(_provider_name(state.provider))} | "
+        f"<b>Results:</b> {total} | <b>Page:</b> {state.page}/{pages}",
+    ]
+    if state.failed:
+        lines.append(
+            f"<b>Failed providers:</b> <i>{escape(', '.join(state.failed))}</i>"
         )
-    elif len(key) == 1 and SITES is None:
-        await send_message(message, "Send a search key along with command")
-    elif len(key) == 1:
-        buttons.data_button("Trending", f"torser {user_id} apitrend")
-        buttons.data_button("Recent", f"torser {user_id} apirecent")
-        buttons.data_button("Cancel", f"torser {user_id} cancel")
-        button = buttons.build_menu(2)
-        await send_message(message, "Send a search key along with command", button)
-    elif SITES is not None and Config.SEARCH_PLUGINS:
-        buttons.data_button("Api", f"torser {user_id} apisearch")
-        buttons.data_button("Plugins", f"torser {user_id} plugin")
-        buttons.data_button("Cancel", f"torser {user_id} cancel")
-        button = buttons.build_menu(2)
-        await send_message(message, "Choose tool to search:", button)
-    elif SITES is not None:
-        button = api_buttons(user_id, "apisearch")
-        await send_message(message, "Choose site to search | API:", button)
-    else:
-        button = await plugin_buttons(user_id)
-        await send_message(message, "Choose site to search | Plugins:", button)
+    rows: list[list[InlineKeyboardButton]] = []
+    for index in range(start, min(start + PAGE_SIZE, total)):
+        item = state.results[index]
+        lines.append("")
+        lines.append(f"<b>{index + 1}. {escape(str(item.get('name', '')))}</b>")
+        lines.append(
+            f"{escape(str(item.get('size', '')))} | "
+            f"S:{item.get('seeder', 0)} | L:{item.get('leecher', 0)} | "
+            f"{escape(_provider_name(str(item.get('provider', ''))))}"
+        )
+        row: list[InlineKeyboardButton] = []
+        if item.get("magnet"):
+            row.append(
+                InlineKeyboardButton(
+                    "Magnet",
+                    callback_data=_cb(user_id, "m", index),
+                    style=ButtonStyle.SUCCESS,
+                )
+            )
+        if item.get("url"):
+            row.append(
+                InlineKeyboardButton(
+                    "Torrent", url=str(item["url"]), style=ButtonStyle.PRIMARY
+                )
+            )
+        if row:
+            rows.append(row)
+    navigation: list[InlineKeyboardButton] = []
+    if state.page > 1:
+        navigation.append(
+            InlineKeyboardButton(
+                "Prev",
+                callback_data=_cb(user_id, "p", state.page - 1),
+                style=ButtonStyle.PRIMARY,
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            f"{state.page}/{pages}",
+            callback_data=_cb(user_id, "n"),
+            style=ButtonStyle.DEFAULT,
+        )
+    )
+    if state.page < pages:
+        navigation.append(
+            InlineKeyboardButton(
+                "Next",
+                callback_data=_cb(user_id, "p", state.page + 1),
+                style=ButtonStyle.PRIMARY,
+            )
+        )
+    rows.append(navigation)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "Close", callback_data=_cb(user_id, "c"), style=ButtonStyle.DANGER
+            )
+        ]
+    )
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def _reply_key(message: Message) -> str | None:
+    """The search key, read back from the command the menu replies to."""
+    replied = message.reply_to_message
+    if replied is None:
+        return None
+    parts = message_text(replied).split(maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+
+
+async def _start_search(
+    query: CallbackQuery, message: Message, user_id: int, provider: str
+) -> None:
+    key = _reply_key(message)
+    if key is None:
+        await query.answer("Search key is gone, send the command again.", show_alert=True)
+        return
+    await query.answer()
+    await edit_message(
+        message,
+        f"<b>Searching</b> <i>{escape(key)}</i> on "
+        f"<b>{escape(_provider_name(provider))}</b>...",
+    )
+    try:
+        results, failed = await _search(key, provider)
+    except Exception as e:
+        await edit_message(message, f"<b>Search failed:</b> {escape(str(e))}")
+        return
+    if not results:
+        await edit_message(
+            message,
+            f"<b>No result found for <i>{escape(key)}</i></b>\n"
+            f"<b>Provider:</b> <i>{escape(_provider_name(provider))}</i>",
+        )
+        return
+    _SEARCHES[user_id] = _SearchState(key, provider, results, failed)
+    text, buttons = render_page(user_id, 1)
+    await edit_message(message, text, buttons)
+
+
+async def _show_page(message: Message, user_id: int, page: int) -> None:
+    if user_id not in _SEARCHES:
+        await edit_message(message, "That search expired, send the command again.")
+        return
+    text, buttons = render_page(user_id, page)
+    await edit_message(message, text, buttons)
+
+
+async def _send_magnet(
+    query: CallbackQuery, message: Message, user_id: int, index: int
+) -> None:
+    state = _SEARCHES.get(user_id)
+    if state is None or not 0 <= index < len(state.results):
+        await query.answer("That search expired, send the command again.", show_alert=True)
+        return
+    magnet = state.results[index].get("magnet")
+    if not magnet:
+        await query.answer("This result has no magnet, use its Torrent button.", show_alert=True)
+        return
+    await query.answer("Magnet sent")
+    await send_message(message, f"<code>{escape(str(magnet))}</code>")
 
 
 @new_task
-async def torrent_search_update(_, query):
-    user_id = query.from_user.id
-    message = query.message
-    key = message_text(message.reply_to_message).split(maxsplit=1)
-    key = key[1].strip() if len(key) > 1 else None
-    data = query.data.split()
-    if user_id != int(data[1]):
+async def torrent_search(_, message: Message) -> None:
+    if message.from_user is None:
+        return
+    user_id = message.from_user.id
+    parts = message_text(message).split(maxsplit=1)
+    key = parts[1].strip() if len(parts) > 1 else ""
+    if not key:
+        await send_message(
+            message,
+            "Send a search key along with the command, e.g. "
+            "<code>/search ubuntu</code>",
+        )
+        return
+    if not PROVIDERS:
+        await send_message(
+            message,
+            "Torrent search is unavailable: the provider list could not be fetched.",
+        )
+        return
+    await send_message(
+        message,
+        f"<b>Searching for</b> <i>{escape(key)}</i>\n<b>Choose a provider:</b>",
+        _provider_buttons(user_id),
+    )
+
+
+@new_task
+async def torrent_search_update(_, query: CallbackQuery) -> None:
+    if not query.data or query.message is None or query.from_user is None:
+        return
+    data = query.data.decode() if isinstance(query.data, bytes) else query.data
+    parts = data.split(":")
+    if len(parts) < 3:
+        return
+    try:
+        user_id = int(parts[1])
+    except ValueError:
+        return
+    if query.from_user.id != user_id:
         await query.answer("Not Yours!", show_alert=True)
-    elif data[2].startswith("api"):
-        await query.answer()
-        button = api_buttons(user_id, data[2])
-        await edit_message(message, "Choose site:", button)
-    elif data[2] == "plugin":
-        await query.answer()
-        button = await plugin_buttons(user_id)
-        await edit_message(message, "Choose site:", button)
-    elif data[2] != "cancel":
-        await query.answer()
-        site = data[2]
-        method = data[3]
-        if method.startswith("api"):
-            if key is None:
-                endpoint = "Recent" if method == "apirecent" else "Trending"
-                await edit_message(
-                    message,
-                    f"<b>Listing {endpoint} Items...</b>\n"
-                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>",
-                )
-            else:
-                await edit_message(
-                    message,
-                    f"<b>Searching for <i>{key}</i></b>\n"
-                    f"<b>Torrent Site:</b> <i>{api_sites().get(site)}</i>",
-                )
-        else:
-            await edit_message(
-                message,
-                f"<b>Searching for <i>{key}</i></b>\n"
-                f"<b>Torrent Site:</b> <i>{site.capitalize()}</i>",
-            )
-        await search(key, site, message, method)
-    else:
+        return
+    action = parts[2]
+    message = query.message
+    if action == "c":
         await query.answer()
         await edit_message(message, "Search has been canceled!")
+    elif action == "s":
+        await _start_search(
+            query, message, user_id, parts[3] if len(parts) > 3 else ALL_PROVIDERS
+        )
+    elif action == "p":
+        await query.answer()
+        await _show_page(message, user_id, int(parts[3]))
+    elif action == "m":
+        await _send_magnet(query, message, user_id, int(parts[3]))
+    else:
+        # "n" is the page counter, which exists to show the position only.
+        await query.answer()

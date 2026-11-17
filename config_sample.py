@@ -115,28 +115,6 @@ FTP_TLS = False
 RSS_DELAY = 600
 RSS_CHAT = ""
 RSS_SIZE_LIMIT = 0
-# Torrent Search
-SEARCH_API_LINK = ""
-SEARCH_LIMIT = 0
-SEARCH_PLUGINS = [
-    "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/piratebay.py",
-    "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/limetorrents.py",
-    "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/torlock.py",
-    "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/torrentscsv.py",
-    "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/eztv.py",
-    "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/torrentproject.py",
-    "https://raw.githubusercontent.com/MaurizioRicci/qBittorrent_search_engines/master/kickass_torrent.py",
-    "https://raw.githubusercontent.com/MaurizioRicci/qBittorrent_search_engines/master/yts_am.py",
-    "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/master/engines/linuxtracker.py",
-    "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/master/engines/nyaasi.py",
-    "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/ettv.py",
-    "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/glotorrents.py",
-    "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/thepiratebay.py",
-    "https://raw.githubusercontent.com/v1k45/1337x-qBittorrent-search-plugin/master/leetx.py",
-    "https://raw.githubusercontent.com/nindogo/qbtSearchScripts/master/magnetdl.py",
-    "https://raw.githubusercontent.com/msagca/qbittorrent_plugins/main/uniondht.py",
-    "https://raw.githubusercontent.com/khensolomon/leyts/master/yts.py",
-]
 # Private Seedbox
 # One or more hosts (comma/space separated) of a private seedbox behind HTTP
 # basic auth, e.g. "swift-010.seedbox.vip". A link to a directory there is

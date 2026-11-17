@@ -111,9 +111,6 @@ class Config:
     FTP_PASSWORD = ""
     FTP_PATH = ""
     FTP_TLS = False
-    SEARCH_API_LINK = ""
-    SEARCH_LIMIT = 0
-    SEARCH_PLUGINS = []
     # A private seedbox behind HTTP basic auth, whose nginx directory listings
     # the bot will walk. Any host named here (comma or space separated) is
     # scraped with the credentials below, and every file the listing shows is
@@ -262,7 +259,6 @@ class Config:
 
         if attr in {
             "BASE_URL",
-            "SEARCH_API_LINK",
             "MEGA_PROXY_URL",
             "S3_ENDPOINT_URL",
             "S3_BROWSER_URL",
