@@ -352,10 +352,11 @@ class TelegramUploader:
         absorbed right where they already are, one by one.
         """
         try:
+            reply_parameters = ReplyParameters(message_id=reply_to_message_id)
             return await self._group_client.send_media_group(
                 chat_id=chat_id,
                 media=media,
-                reply_to_message_id=reply_to_message_id,
+                reply_parameters=reply_parameters,
                 disable_notification=True,
             )
         except (OSError, TimeoutError) as e:
