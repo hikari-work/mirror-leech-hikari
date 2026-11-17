@@ -388,7 +388,7 @@ def test_every_registered_domain_is_snapshotted(dlg):
 
 def test_registry_covers_every_handler(dlg):
     """All 41 branches of the old chain are registered -- 38 by domain, plus
-    the three predicate-only ones (vidoy, mega, share_link)."""
+    the predicate-only ones (vidoy, mega, share_link, and the newer hosts)."""
     handlers = {entry.handler.__name__ for entry in dlg.registered_entries()}
     assert handlers == set(EXPECTED.values()) | {
         "vidoy",
@@ -397,6 +397,7 @@ def test_registry_covers_every_handler(dlg):
         "vidara",
         "bunkr",
         "seedbox",
+        "erome",
         "shyav",
         "kpop",
         "x_post",
@@ -458,6 +459,9 @@ CHAIN_ORDER.append("bunkr")
 # seedbox (order=44) matches on the hosts named in Config, so it is registered
 # as a predicate too -- and last of the old chain, which is where its order sits.
 CHAIN_ORDER.append("seedbox")
+# erome (order=45) is newer than the chain; its host predicate sits after the
+# chain's entries so it never shadows one of them.
+CHAIN_ORDER.append("erome")
 # shyav (order=90) and kpop (order=91) are newer than the chain and are
 # registered after it, which is what keeps them from shadowing a domain the old
 # chain already claimed.
