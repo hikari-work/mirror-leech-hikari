@@ -87,8 +87,16 @@ async def _search(
     return results, failed
 
 
-def _cb(user_id: int, action: str, arg: str | int = "") -> str:
-    return f"torser:{user_id}:{action}:{arg}" if arg != "" else f"torser:{user_id}:{action}"
+def _cb(user_id: int, action: str, arg: str | int = "", token: int = 0) -> str:
+    """Callback data for *action*; *token* pins it to the page that drew it.
+
+    Zero keeps the old short form, which the provider menu and the page counter
+    use. A paging button carries the page it was drawn on, so a tap on a stale
+    keyboard (an earlier render, or a double tap) is refused instead of moving
+    from the page the user never saw.
+    """
+    suffix = f":{arg}:{token}" if token else (f":{arg}" if arg != "" else "")
+    return f"torser:{user_id}:{action}{suffix}"
 
 
 def _provider_buttons(user_id: int) -> InlineKeyboardMarkup:
@@ -121,7 +129,7 @@ def render_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarkup]:
         lines.append(
             f"<b>Failed providers:</b> <i>{escape(', '.join(state.failed))}</i>"
         )
-    rows: list[list[InlineKeyboardButton]] = []
+    buttons = ButtonMaker()
     for index in range(start, min(start + PAGE_SIZE, total)):
         item = state.results[index]
         lines.append("")
@@ -131,56 +139,45 @@ def render_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarkup]:
             f"S:{item.get('seeder', 0)} | L:{item.get('leecher', 0)} | "
             f"{escape(_provider_name(str(item.get('provider', ''))))}"
         )
-        row: list[InlineKeyboardButton] = []
         if item.get("magnet"):
-            row.append(
-                InlineKeyboardButton(
-                    "Magnet",
-                    callback_data=_cb(user_id, "m", index),
-                    style=ButtonStyle.SUCCESS,
-                )
+            buttons.data_button(
+                "Magnet",
+                _cb(user_id, "m", index),
+                style=ButtonStyle.SUCCESS,
             )
         if item.get("url"):
-            row.append(
-                InlineKeyboardButton(
-                    "Torrent", url=str(item["url"]), style=ButtonStyle.PRIMARY
-                )
+            buttons.url_button(
+                "Torrent", str(item["url"]), style=ButtonStyle.PRIMARY
             )
-        if row:
-            rows.append(row)
-    navigation: list[InlineKeyboardButton] = []
+    # Two buttons per result row, then the navigation and Close rows: footer
+    # buttons each become their own row at ``f_cols=1`` (and land last).
     if state.page > 1:
-        navigation.append(
-            InlineKeyboardButton(
-                "Prev",
-                callback_data=_cb(user_id, "p", state.page - 1),
-                style=ButtonStyle.PRIMARY,
-            )
+        buttons.data_button(
+            "Prev",
+            _cb(user_id, "p", state.page - 1, state.page),
+            position="footer",
+            style=ButtonStyle.PRIMARY,
         )
-    navigation.append(
-        InlineKeyboardButton(
-            f"{state.page}/{pages}",
-            callback_data=_cb(user_id, "n"),
-            style=ButtonStyle.DEFAULT,
-        )
+    buttons.data_button(
+        f"{state.page}/{pages}",
+        _cb(user_id, "n"),
+        position="footer",
+        style=ButtonStyle.DEFAULT,
     )
     if state.page < pages:
-        navigation.append(
-            InlineKeyboardButton(
-                "Next",
-                callback_data=_cb(user_id, "p", state.page + 1),
-                style=ButtonStyle.PRIMARY,
-            )
+        buttons.data_button(
+            "Next",
+            _cb(user_id, "p", state.page + 1, state.page),
+            position="footer",
+            style=ButtonStyle.PRIMARY,
         )
-    rows.append(navigation)
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "Close", callback_data=_cb(user_id, "c"), style=ButtonStyle.DANGER
-            )
-        ]
+    buttons.data_button(
+        "Close",
+        _cb(user_id, "c"),
+        position="footer",
+        style=ButtonStyle.DANGER,
     )
-    return "\n".join(lines), InlineKeyboardMarkup(rows)
+    return "\n".join(lines), buttons.build_menu(2, f_cols=1)
 
 
 def _reply_key(message: Message) -> str | None:
@@ -222,12 +219,23 @@ async def _start_search(
     await edit_message(message, text, buttons)
 
 
-async def _show_page(message: Message, user_id: int, page: int) -> None:
-    if user_id not in _SEARCHES:
-        await edit_message(message, "That search expired, send the command again.")
-        return
+async def _show_page(
+    query: CallbackQuery, message: Message, user_id: int, page: int, token: int
+) -> bool:
+    """Paint *page*; False when the press was refused, so it is not re-answered."""
+    state = _SEARCHES.get(user_id)
+    if state is None:
+        await query.answer(
+            "That search expired, send the command again.", show_alert=True
+        )
+        return False
+    if token and token != state.page:
+        # Drawn for a page the state has left: the tap came from a stale render
+        # (an earlier edit, or a double tap). Nothing to redraw.
+        return False
     text, buttons = render_page(user_id, page)
     await edit_message(message, text, buttons)
+    return True
 
 
 async def _send_magnet(
@@ -288,19 +296,29 @@ async def torrent_search_update(_, query: CallbackQuery) -> None:
         await query.answer("Not Yours!", show_alert=True)
         return
     action = parts[2]
+    arg = parts[3] if len(parts) > 3 else ""
     message = query.message
     if action == "c":
         await query.answer()
         await edit_message(message, "Search has been canceled!")
     elif action == "s":
-        await _start_search(
-            query, message, user_id, parts[3] if len(parts) > 3 else ALL_PROVIDERS
-        )
+        await _start_search(query, message, user_id, arg or ALL_PROVIDERS)
     elif action == "p":
-        await query.answer()
-        await _show_page(message, user_id, int(parts[3]))
+        try:
+            page = int(arg)
+            token = int(parts[4]) if len(parts) > 4 else 0
+        except ValueError:
+            await query.answer()
+            return
+        if await _show_page(query, message, user_id, page, token):
+            await query.answer()
     elif action == "m":
-        await _send_magnet(query, message, user_id, int(parts[3]))
+        try:
+            index = int(arg)
+        except ValueError:
+            await query.answer()
+            return
+        await _send_magnet(query, message, user_id, index)
     else:
         # "n" is the page counter, which exists to show the position only.
         await query.answer()
