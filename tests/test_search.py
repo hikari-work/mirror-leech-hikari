@@ -200,8 +200,9 @@ def test_render_page_pages_and_links_results(search):
         for b in row
         if b.callback_data
     ]
-    assert "torser:7:p:1" in callbacks
-    assert "torser:7:p:3" in callbacks
+    assert "torser:7:p:1:2" in callbacks
+    assert "torser:7:p:3:2" in callbacks
+    assert "torser:7:p:3" not in callbacks
     assert "torser:7:m:5" in callbacks
     magnet_row = next(
         row
