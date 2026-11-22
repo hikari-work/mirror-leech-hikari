@@ -197,6 +197,15 @@ def test_a_split_size_the_resolver_would_ignore_is_refused(junk):
     assert state["-sp"] == "2gb"
 
 
+@pytest.mark.parametrize("huge", ["infg", "1e999g", "9" * 400 + "g"], ids=str)
+def test_a_size_too_large_to_hold_is_refused_not_raised(huge: str) -> None:
+    """``get_size_bytes`` overflows on these; a raise would kill the read."""
+    state = state_of("-sp", "2gb")
+
+    assert opts.set_value(state, "-sp", huge) != ""
+    assert state["-sp"] == "2gb"
+
+
 @pytest.mark.parametrize("flag", ["-e", "-z"], ids=["extract", "zip"])
 def test_the_flags_that_carry_a_password_ask_for_one(flag):
     """``-e password`` and ``-z password`` are what the pipeline reads."""
@@ -346,6 +355,15 @@ def test_a_typed_value_is_shown_on_its_button():
 
     assert "renamed" in labelled(markup, "Name").text
     assert "-n renamed" in text
+
+
+def test_a_value_flag_offers_a_value_prompt_not_a_toggle() -> None:
+    """``-n`` and ``-sp`` answer with text; a toggle would write ``True`` into them."""
+    _, _, markup = rendered()
+
+    assert data_for(markup, "v:-n").endswith("v:-n")
+    assert data_for(markup, "v:-sp").endswith("v:-sp")
+    assert data_for(markup, "t:-e").endswith("t:-e")
 
 
 def test_every_preset_gets_a_button_and_only_one_is_marked():
@@ -695,6 +713,29 @@ async def test_a_toggle_redraws_and_re_settles_the_task(wire):
     assert await task is False
 
 
+@pytest.mark.parametrize("flag", ["-n", "-sp"], ids=["name", "split"])
+async def test_a_stale_toggle_for_a_value_flag_changes_nothing(
+    wire: Wire, flag: str
+) -> None:
+    """A keyboard drawn before the fix still emits ``t:`` for these flags.
+
+    ``-n`` and ``-sp`` take text, so a toggle would write ``True`` into a ``str``
+    field -- a name that crashes mega, a split size that becomes one byte.
+    """
+    listener = FakeListener()
+    args = leech_args()
+    field = opts.OPTIONS[flag].field
+    before = getattr(args, field)
+    task = await opening(listener, args, wire)
+
+    query = await press(wire, "t:", flag)
+
+    assert getattr(args, field) == before
+    assert listener.applied == []
+    assert query.answers == [(None, False)]
+    await close_unpressed(task)
+
+
 async def test_a_started_task_keeps_what_was_toggled(wire):
     listener = FakeListener()
     args = leech_args()
@@ -913,25 +954,99 @@ async def test_asking_for_a_value_lets_the_press_return(wire):
     assert await task is False
 
 
-async def test_a_second_press_while_asking_only_re_asks(wire):
+async def test_a_second_press_on_the_same_flag_only_re_asks(wire):
     """One message answers one question; the read already running takes it."""
     listener = FakeListener()
     args = leech_args()
     task = await opening(listener, args, wire)
     wire.hold_reply = True
-    wire.reply = "hunter2"
+    wire.reply = "renamed"
 
-    await wait_for(press(wire, "t:", "-e"), 1)
+    await wait_for(press(wire, "v:", "-n"), 1)
     first = reading_prompt(wire).reading
-    await wait_for(press(wire, "t:", "-z"), 1)
+    await wait_for(press(wire, "v:", "-n"), 1)
 
     assert reading_prompt(wire).reading is first
     wire.reply_ready.set()
     await first
-    assert args.extract == "hunter2"
-    assert args.compress is True  # on, without a password of its own
+    assert args.name == "renamed"
     await press(wire, "x")
     assert await task is False
+
+
+async def test_a_second_value_press_reads_for_the_flag_it_asked_about(
+    wire: Wire,
+) -> None:
+    """The read in flight belongs to the flag that opened it.
+
+    A read left running would take this answer for the old flag -- a split size
+    landing in ``args.name`` while ``args.split_size`` stayed empty.
+    """
+    listener = FakeListener()
+    args = leech_args()
+    task = await opening(listener, args, wire)
+    wire.hold_reply = True
+    wire.reply = "2gb"
+
+    await wait_for(press(wire, "v:", "-n"), 1)
+    first = reading_prompt(wire).reading
+    await wait_for(press(wire, "v:", "-sp"), 1)
+    second = reading_prompt(wire).reading
+
+    assert second is not first
+    with pytest.raises(CancelledError):
+        await wait_for(first, 1)  # the superseded read is gone, not still waiting
+    wire.reply_ready.set()
+    await second
+
+    assert args.split_size == "2gb"
+    assert args.name == ""
+    assert "Split set." in wire.edits[-1][0]
+    await press(wire, "x")
+    assert await task is False
+
+
+@pytest.mark.parametrize("action", ["go", "x"], ids=["start", "cancel"])
+async def test_closing_the_keyboard_ends_the_value_read(
+    wire: Wire, action: str
+) -> None:
+    """A read left open would take the user's next message and delete it."""
+    listener = FakeListener()
+    args = leech_args()
+    task = await opening(listener, args, wire)
+    wire.hold_reply = True
+    wire.reply = "late"
+
+    await wait_for(press(wire, "v:", "-n"), 1)
+    reading = reading_prompt(wire).reading
+    await press(wire, action)
+
+    with pytest.raises(CancelledError):
+        await wait_for(reading, 1)
+
+    assert await task is (action == "go")
+    assert reading.cancelled()
+    assert args.name == ""
+
+
+async def test_an_expired_keyboard_ends_the_value_read(
+    monkeypatch: pytest.MonkeyPatch, wire: Wire
+) -> None:
+    """Expiry is the third way out; a read left open still eats the next message."""
+    monkeypatch.setattr(opts, "PROMPT_TTL", 0.2)
+    listener = FakeListener()
+    task = await opening(listener, leech_args(), wire)
+    wire.hold_reply = True
+    wire.reply = "late"
+
+    await wait_for(press(wire, "v:", "-n"), 1)
+    reading = reading_prompt(wire).reading
+
+    assert await wait_for(task, 1) is False
+    with pytest.raises(CancelledError):
+        await wait_for(reading, 1)
+    assert reading.cancelled()
+    assert "expired" in wire.edits[-1][0]
 
 
 async def test_someone_else_cannot_press_the_buttons(wire):
@@ -1014,7 +1129,8 @@ async def test_a_value_that_arrives_after_start_does_not_reopen_the_keyboard(wir
     await press(wire, "go")
     assert await task is True
     wire.reply_ready.set()
-    await reading
+    with pytest.raises(CancelledError):
+        await wait_for(reading, 1)
 
     assert args.name == ""  # the value never reached the args
     assert "-n late" not in wire.edits[-1][0]

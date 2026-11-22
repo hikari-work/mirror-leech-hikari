@@ -186,7 +186,9 @@ def _split_size_error(text: str) -> str:
         return "" if int(text) > 0 else "A split size has to be more than zero."
     try:
         size = get_size_bytes(text)
-    except ValueError:
+    except (ValueError, OverflowError):
+        # "infg" and an integer too long for a float reach the same refusal;
+        # letting the overflow out would kill the read that is waiting.
         size = 0
     if size > 0:
         return ""
@@ -229,9 +231,13 @@ def render(
         buttons.data_button("↩️ Back", _data(user_id, "b"), "footer")
     else:
         for flag in options_for(command):
-            if OPTIONS[flag].kind != PRESET:
+            spec = OPTIONS[flag]
+            if spec.kind != PRESET:
+                # A value flag answers with text; a toggle would write True over
+                # the str or int behind it.
+                action = "v" if spec.kind == VALUE else "t"
                 buttons.data_button(
-                    _flag_label(state, flag), _data(user_id, f"t:{flag}")
+                    _flag_label(state, flag), _data(user_id, f"{action}:{flag}")
                 )
         if presets or state["-c"]:
             buttons.data_button(_copy_label(state), _data(user_id, "c"))
@@ -358,6 +364,9 @@ class Prompt:
     reading: Task[None] | None = None
     """The message read in flight for a value flag, if any -- see ``_ask_value``."""
 
+    reading_flag: str = ""
+    """Which flag that read is for; a press on another one replaces it."""
+
 
 pending: dict[tuple[int | None, int], Prompt] = {}
 """``(chat id, prompt message id)`` -> the keyboard offered there.
@@ -444,6 +453,7 @@ async def ask_options(
         return False
     finally:
         pending.pop(key, None)
+        _stop_reading(prompt)
 
 
 async def task_options_callback(client: Client, query: CallbackQuery) -> None:
@@ -494,7 +504,12 @@ async def _press_option(
     kind, _, value = action.partition(":")
     if kind == "p":
         select_preset(prompt.state, value)
-    elif kind == "t" and value in options_for(prompt.command):
+    elif (
+        kind == "t"
+        and value in options_for(prompt.command)
+        # a keyboard drawn before the fix still says t: for these
+        and OPTIONS[value].kind != VALUE
+    ):
         toggle(prompt.state, value)
         if prompt.state[value] is True and OPTIONS[value].kind == EXTRA:
             # Switched on, and what this flag can carry is a password the user
@@ -518,9 +533,21 @@ def _prompt_of(query: CallbackQuery) -> Prompt | None:
     return pending.get((chat_of(message).id, message.id))
 
 
+def _stop_reading(prompt: Prompt) -> None:
+    """End the read in flight, if any.
+
+    Left open, it would take the user's next message -- the link of their next
+    command, or the ``/cancel`` they typed -- and delete it.
+    """
+    if prompt.reading is not None and not prompt.reading.done():
+        prompt.reading.cancel()
+
+
 def _forget(query: CallbackQuery) -> None:
     message = query_message(query)
-    pending.pop((chat_of(message).id, message.id), None)
+    prompt = pending.pop((chat_of(message).id, message.id), None)
+    if prompt is not None:
+        _stop_reading(prompt)
 
 
 async def _close(query: CallbackQuery, prompt: Prompt, run: bool) -> None:
@@ -581,9 +608,14 @@ async def _ask_value(
     )
     await edit_message(query.message, f"{ask} Waiting {VALUE_TIMEOUT}s.", buttons)
     if prompt.reading is not None and not prompt.reading.done():
-        # One message answers one question: a second press only refreshes the
-        # ask, and the read already running takes what the user sends.
-        return
+        if prompt.reading_flag == flag:
+            # One message answers one question: a second press on the same flag
+            # only refreshes the ask, and the read already running takes it.
+            return
+        # The read in flight was opened by another flag, and would file this
+        # answer under that one. ``wait_for_reply`` drops its handler on cancel.
+        prompt.reading.cancel()
+    prompt.reading_flag = flag
     prompt.reading = get_running_loop().create_task(
         _catch_value(client, query_message(query), prompt, flag)
     )
