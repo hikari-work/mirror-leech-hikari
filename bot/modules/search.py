@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from httpx import AsyncClient
 from pyrogram.enums import ButtonStyle
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup
 
 from .. import LOGGER
 from ..helper.net.gateway import gateway_headers, gateway_url

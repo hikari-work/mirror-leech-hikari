@@ -233,3 +233,81 @@ async def test_magnet_button_sends_the_link(search):
     await search._send_magnet(_Query(), SimpleNamespace(), 7, 0)
     assert "magnet:?xt=urn:btih:abc" in search.recorder.sent[0][0]
     assert answered == ["Magnet sent"]
+
+
+class _Press:
+    """A callback press: records answers, its message is never edited by itself."""
+
+    def __init__(self, user_id=7):
+        self.data = "torser:7:p:3:1"
+        self.message = SimpleNamespace()
+        self.from_user = SimpleNamespace(id=user_id)
+        self.answers = []
+
+    async def answer(self, text=None, show_alert=False):
+        self.answers.append((text, show_alert))
+
+
+def _paged(search, page=2):
+    search._SEARCHES[7] = search._SearchState(
+        key="ubuntu",
+        provider="piratebay",
+        results=[
+            {"name": f"Result {n}", "magnet": f"magnet:?xt=urn:btih:{n}"}
+            for n in range(1, 13)
+        ],
+        failed=[],
+        page=page,
+    )
+
+
+async def test_stale_paging_tap_is_refused_and_makes_no_request(search, monkeypatch):
+    monkeypatch.setattr(search, "AsyncClient", _Client)
+    _Client.calls = []
+    _paged(search, page=2)
+    query = _Press()
+
+    assert await search._show_page(query, query.message, 7, 3, token=1) is False
+    assert search.recorder.edited == []
+    assert query.answers == []
+
+    assert await search._show_page(query, query.message, 7, 3, token=2) is True
+    assert len(search.recorder.edited) == 1
+    assert "<b>Page:</b> 3/3" in search.recorder.edited[0][0]
+    assert _Client.calls == []
+
+
+async def test_expired_search_press_alerts(search):
+    search._SEARCHES.pop(7, None)
+    query = _Press()
+    query.data = "torser:7:p:2:1"
+
+    await search.torrent_search_update(None, query)
+
+    assert query.answers == [
+        ("That search expired, send the command again.", True)
+    ]
+    assert search.recorder.edited == []
+
+
+async def test_paging_press_edits_once_and_answers(search):
+    _paged(search, page=2)
+    query = _Press()
+    query.data = "torser:7:p:3:2"
+
+    await search.torrent_search_update(None, query)
+
+    assert len(search.recorder.edited) == 1
+    assert "<b>Page:</b> 3/3" in search.recorder.edited[0][0]
+    assert query.answers == [(None, False)]
+
+
+async def test_malformed_paging_data_is_answered_not_crashed(search):
+    _paged(search, page=2)
+    query = _Press()
+    query.data = "torser:7:p:x:2"
+
+    await search.torrent_search_update(None, query)
+
+    assert search.recorder.edited == []
+    assert query.answers == [(None, False)]
